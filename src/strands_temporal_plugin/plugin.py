@@ -5,15 +5,18 @@ Following the OpenAI Agents pattern exactly for clean integration.
 
 from __future__ import annotations
 
+from contextlib import AbstractAsyncContextManager
+from typing import AsyncIterator
+
 import temporalio.client
 import temporalio.service
 import temporalio.worker
-from .activities import execute_strands_agent
+from .activities import execute_strands_model
 from .runner import set_strands_temporal_overrides
-from temporalio.client import ClientConfig
+from temporalio.client import ClientConfig, Plugin, WorkflowHistory
 from temporalio.contrib.pydantic import PydanticPayloadConverter
 from temporalio.converter import DataConverter
-from temporalio.worker import WorkerConfig
+from temporalio.worker import WorkerConfig, Worker, ReplayerConfig, Replayer, WorkflowReplayResult
 from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
 
 
@@ -32,6 +35,30 @@ class StrandsTemporalPlugin(temporalio.client.Plugin, temporalio.worker.Plugin):
     worker = Worker(client, task_queue="strands-agents", workflows=[MyWorkflow])
     ```
     """
+
+    def run_replayer(self, replayer: Replayer, histories: AsyncIterator[WorkflowHistory]) -> \
+    AbstractAsyncContextManager[AsyncIterator[WorkflowReplayResult]]:
+        return self.next_worker_plugin.run_replayer(replayer, histories)
+
+    def configure_replayer(self, config: ReplayerConfig) -> ReplayerConfig:
+        return self.next_worker_plugin.configure_replayer(config)
+
+    async def run_worker(self, worker: Worker) -> None:
+        await self.next_worker_plugin.run_worker(worker)
+
+    def init_client_plugin(self, next: temporalio.client.Plugin) -> None:
+        """Set the next client plugin"""
+        self.next_client_plugin = next
+
+    async def connect_service_client(
+        self, config: temporalio.service.ConnectConfig
+    ) -> temporalio.service.ServiceClient:
+        """No modifications to service client"""
+        return await self.next_client_plugin.connect_service_client(config)
+
+    def init_worker_plugin(self, next: temporalio.worker.Plugin) -> None:
+        """Set the next worker plugin"""
+        self.next_worker_plugin = next
 
     def configure_client(self, config: ClientConfig) -> ClientConfig:
         """Configure client with Pydantic data converter."""
@@ -57,12 +84,12 @@ class StrandsTemporalPlugin(temporalio.client.Plugin, temporalio.worker.Plugin):
 
         # Register the single agent execution activity
         activities = list(config.get("activities") or [])
-        activities.append(execute_strands_agent)
+        activities.append(execute_strands_model)
         config["activities"] = activities
 
         # CRITICAL: Set up the global overrides here so they're active for all workflows
         print("Activating Strands temporal overrides globally...")
-        self._setup_global_overrides()
+        # self._setup_global_overrides()
 
         return config
 

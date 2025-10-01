@@ -17,17 +17,15 @@ from strands.types.tools import ToolSpec
 from strands.types.content import Messages
 from strands.types.streaming import StreamEvent
 
-from .activities import AgentExecutionInput, AgentExecutionResult, execute_strands_agent
+from .activities import ModelExecutionInput, ModelExecutionResult, execute_strands_model
 
 
 class TemporalModelStub(Model):
     """Model stub that routes calls to Temporal activities when in workflow context."""
 
-    def __init__(self, original_model: Model, agent_tools: list, agent_system_prompt: str | None = None):
+    def __init__(self, original_model: Model):
         """Initialize with the original model configuration."""
         self.original_model = original_model
-        self.agent_tools = agent_tools
-        self.agent_system_prompt = agent_system_prompt
 
     def update_config(self, **kwargs: Any) -> None:
         """Delegate to original model."""
@@ -54,44 +52,22 @@ class TemporalModelStub(Model):
         # In workflow - route to activity for durable execution
         model_config = self._extract_model_config()
 
-        # Extract prompt from messages
-        prompt = self._extract_prompt_from_messages(messages)
-
-        activity_input = AgentExecutionInput(
-            prompt=prompt,
+        activity_input = ModelExecutionInput(
             ai_model_config=model_config,
-            tool_specs=self.agent_tools,  # Use agent tools, not model tool_specs
-            system_prompt=self.agent_system_prompt or system_prompt,
+            tool_specs=tool_specs,
+            system_prompt=system_prompt,
             messages=messages,
         )
 
         # Execute via activity
-        activity_result: AgentExecutionResult = await workflow.execute_activity(
-            execute_strands_agent,
+        activity_result: ModelExecutionResult = await workflow.execute_activity(
+            execute_strands_model,
             activity_input,
             start_to_close_timeout=timedelta(minutes=5),
         )
 
-        # Convert activity result back to stream format
-        yield {"messageStart": {"role": "assistant"}}
-        yield {"contentBlockStart": {"contentBlockIndex": 0}}
-
-        # Stream text in chunks to simulate normal streaming
-        text = activity_result.text or ""
-        chunk_size = 50
-        for i in range(0, len(text), chunk_size):
-            chunk = text[i : i + chunk_size]
-            yield {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": chunk}}}
-
-        yield {"contentBlockStop": {"contentBlockIndex": 0}}
-        # Map stop reason properly
-        stop_reason = "end_turn"  # Default
-        if activity_result.stop_reason == "tool_use":
-            stop_reason = "tool_use"
-        elif activity_result.stop_reason == "max_tokens":
-            stop_reason = "max_tokens"
-
-        yield {"messageStop": {"stopReason": stop_reason}}
+        for event in activity_result.events:
+            yield event
 
     def _extract_model_config(self) -> dict[str, Any]:
         """Extract model configuration for serialization."""
@@ -100,7 +76,6 @@ class TemporalModelStub(Model):
             return {
                 "type": "bedrock",
                 "model_id": config.get("model_id", "us.anthropic.claude-sonnet-4-20250514-v1:0"),
-                "region": config.get("region_name"),
                 "max_tokens": config.get("max_tokens"),
                 "temperature": config.get("temperature"),
                 "top_p": config.get("top_p"),

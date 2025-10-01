@@ -7,6 +7,8 @@ from temporalio import workflow
 from strands import Agent, tool
 from strands.models import BedrockModel
 
+from strands_temporal_plugin.runner import TemporalModelStub
+
 
 # Define the weather tool (same as before)
 @tool
@@ -52,7 +54,7 @@ class StrandsWeatherAgent:
         # Just create a normal Strands Agent - plugin handles durability automatically!
         # Use model string ID to avoid BedrockModel creation in workflow (which violates sandbox)
         agent = Agent(
-            model="us.anthropic.claude-sonnet-4-20250514-v1:0",  # Plugin will create BedrockModel in activity
+            model=TemporalModelStub(BedrockModel(model_id="us.anthropic.claude-sonnet-4-20250514-v1:0")),  # Plugin will create BedrockModel in activity
             tools=[get_weather],
             system_prompt=(
                 "You are a helpful weather assistant. "
