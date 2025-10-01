@@ -23,17 +23,17 @@ from .activities import ModelExecutionInput, ModelExecutionResult, execute_stran
 class TemporalModelStub(Model):
     """Model stub that routes calls to Temporal activities when in workflow context."""
 
-    def __init__(self, original_model: Model):
+    def __init__(self, model_id: str):
         """Initialize with the original model configuration."""
-        self.original_model = original_model
+        self.model_id = model_id
 
     def update_config(self, **kwargs: Any) -> None:
         """Delegate to original model."""
-        self.original_model.update_config(**kwargs)
+        pass
 
     def get_config(self) -> Any:
         """Get configuration from original model."""
-        return self.original_model.get_config()
+        pass
 
     async def stream(
         self,
@@ -43,17 +43,17 @@ class TemporalModelStub(Model):
         **kwargs: Any,
     ) -> AsyncIterable[StreamEvent]:
         """Route model calls to Temporal activity when in workflow."""
-        if not workflow.in_workflow():
-            # Not in workflow - use original model
-            async for event in self.original_model.stream(messages, tool_specs, system_prompt, **kwargs):
-                yield event
-            return
+        # if not workflow.in_workflow():
+        #     # Not in workflow - use original model
+        #     async for event in self.original_model.stream(messages, tool_specs, system_prompt, **kwargs):
+        #         yield event
+        #     return
 
         # In workflow - route to activity for durable execution
-        model_config = self._extract_model_config()
+        # model_config = self._extract_model_config()
 
         activity_input = ModelExecutionInput(
-            ai_model_config=model_config,
+            model_id=self.model_id,
             tool_specs=tool_specs,
             system_prompt=system_prompt,
             messages=messages,
@@ -69,32 +69,32 @@ class TemporalModelStub(Model):
         for event in activity_result.events:
             yield event
 
-    def _extract_model_config(self) -> dict[str, Any]:
-        """Extract model configuration for serialization."""
-        if isinstance(self.original_model, BedrockModel):
-            config = self.original_model.get_config()
-            return {
-                "type": "bedrock",
-                "model_id": config.get("model_id", "us.anthropic.claude-sonnet-4-20250514-v1:0"),
-                "max_tokens": config.get("max_tokens"),
-                "temperature": config.get("temperature"),
-                "top_p": config.get("top_p"),
-            }
-        else:
-            return {
-                "type": "bedrock",
-                "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0",
-            }
-
-    def _extract_prompt_from_messages(self, messages: Messages) -> str:
-        """Extract user prompt from messages."""
-        # Find the last user message
-        for message in reversed(messages):
-            if message["role"] == "user":
-                for content in message["content"]:
-                    if "text" in content:
-                        return content["text"]
-        return ""
+    # def _extract_model_config(self) -> dict[str, Any]:
+    #     """Extract model configuration for serialization."""
+    #     if isinstance(self.original_model, BedrockModel):
+    #         config = self.original_model.get_config()
+    #         return {
+    #             "type": "bedrock",
+    #             "model_id": config.get("model_id", "us.anthropic.claude-sonnet-4-20250514-v1:0"),
+    #             "max_tokens": config.get("max_tokens"),
+    #             "temperature": config.get("temperature"),
+    #             "top_p": config.get("top_p"),
+    #         }
+    #     else:
+    #         return {
+    #             "type": "bedrock",
+    #             "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+    #         }
+    #
+    # def _extract_prompt_from_messages(self, messages: Messages) -> str:
+    #     """Extract user prompt from messages."""
+    #     # Find the last user message
+    #     for message in reversed(messages):
+    #         if message["role"] == "user":
+    #             for content in message["content"]:
+    #                 if "text" in content:
+    #                     return content["text"]
+    #     return ""
 
     async def structured_output(self, output_model, prompt, system_prompt=None, **kwargs):
         """Not implemented for Temporal stub."""
