@@ -3,11 +3,16 @@
 Following the OpenAI Agents pattern for simple, clean workflow definitions.
 """
 
-from temporalio import workflow
+import logging
 from strands import Agent, tool
-from strands.models import BedrockModel
-
 from strands_temporal_plugin.runner import TemporalModelStub
+from temporalio import workflow
+
+
+logging.getLogger("strands").setLevel(logging.DEBUG)
+
+# Sets the logging format and streams logs to stderr
+logging.basicConfig(format="%(levelname)s | %(name)s | %(message)s", handlers=[logging.StreamHandler()])
 
 
 # Define the weather tool (same as before)
@@ -54,7 +59,9 @@ class StrandsWeatherAgent:
         # Just create a normal Strands Agent - plugin handles durability automatically!
         # Use model string ID to avoid BedrockModel creation in workflow (which violates sandbox)
         agent = Agent(
-            model=TemporalModelStub("us.anthropic.claude-sonnet-4-20250514-v1:0"),  # Plugin will create BedrockModel in activity
+            model=TemporalModelStub(
+                "us.anthropic.claude-sonnet-4-20250514-v1:0"
+            ),  # Plugin will create BedrockModel in activity
             tools=[get_weather],
             system_prompt=(
                 "You are a helpful weather assistant. "
