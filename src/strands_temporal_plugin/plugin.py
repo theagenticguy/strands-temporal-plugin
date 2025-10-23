@@ -5,18 +5,16 @@ Following the OpenAI Agents pattern exactly for clean integration.
 
 from __future__ import annotations
 
-from contextlib import AbstractAsyncContextManager
-from typing import AsyncIterator
-
 import temporalio.client
 import temporalio.service
 import temporalio.worker
 from .activities import execute_strands_model
-from .runner import set_strands_temporal_overrides
-from temporalio.client import ClientConfig, Plugin, WorkflowHistory
+from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager
+from temporalio.client import ClientConfig, WorkflowHistory
 from temporalio.contrib.pydantic import PydanticPayloadConverter
 from temporalio.converter import DataConverter
-from temporalio.worker import WorkerConfig, Worker, ReplayerConfig, Replayer, WorkflowReplayResult
+from temporalio.worker import Replayer, ReplayerConfig, Worker, WorkerConfig, WorkflowReplayResult
 from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
 
 
@@ -36,8 +34,9 @@ class StrandsTemporalPlugin(temporalio.client.Plugin, temporalio.worker.Plugin):
     ```
     """
 
-    def run_replayer(self, replayer: Replayer, histories: AsyncIterator[WorkflowHistory]) -> \
-    AbstractAsyncContextManager[AsyncIterator[WorkflowReplayResult]]:
+    def run_replayer(
+        self, replayer: Replayer, histories: AsyncIterator[WorkflowHistory]
+    ) -> AbstractAsyncContextManager[AsyncIterator[WorkflowReplayResult]]:
         return self.next_worker_plugin.run_replayer(replayer, histories)
 
     def configure_replayer(self, config: ReplayerConfig) -> ReplayerConfig:

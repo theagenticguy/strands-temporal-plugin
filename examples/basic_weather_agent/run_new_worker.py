@@ -4,10 +4,10 @@ Following the OpenAI Agents pattern for simple worker setup.
 """
 
 import asyncio
+from strands_temporal_plugin import StrandsTemporalPlugin
 from temporalio.client import Client
 from temporalio.worker import Worker
-from strands_temporal_plugin import StrandsTemporalPlugin
-from weather_workflow import StrandsWeatherAgent
+from weather_workflow import StrandsWeatherAgent, get_weather_activity
 
 
 async def main():
@@ -26,6 +26,7 @@ async def main():
         client,
         task_queue="strands-agents",
         workflows=[StrandsWeatherAgent],
+        activities=[get_weather_activity],
     )
 
     print("Worker starting...")

@@ -5,19 +5,17 @@ Override Agent.__init__ to inject TemporalModelStub when in workflow context.
 
 from __future__ import annotations
 
+from .activities import ModelExecutionInput, ModelExecutionResult, execute_strands_model
+from collections.abc import AsyncIterable
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Any
-from collections.abc import AsyncIterable
-
-from temporalio import workflow
 from strands import Agent
-from strands.models import Model, BedrockModel
-from strands.types.tools import ToolSpec
+from strands.models import Model
 from strands.types.content import Messages
 from strands.types.streaming import StreamEvent
-
-from .activities import ModelExecutionInput, ModelExecutionResult, execute_strands_model
+from strands.types.tools import ToolSpec
+from temporalio import workflow
+from typing import Any
 
 
 class TemporalModelStub(Model):
@@ -98,6 +96,7 @@ class TemporalModelStub(Model):
 
     async def structured_output(self, output_model, prompt, system_prompt=None, **kwargs):
         """Not implemented for Temporal stub."""
+        print("Structured output not implemented in Temporal context")
         raise NotImplementedError("Structured output not implemented in Temporal context")
 
 

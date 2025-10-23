@@ -4,9 +4,10 @@ Following the OpenAI Agents pattern for simple, clean workflow definitions.
 """
 
 import logging
+from datetime import timedelta
 from strands import Agent, tool
 from strands_temporal_plugin.runner import TemporalModelStub
-from temporalio import workflow
+from temporalio import activity, workflow
 
 
 logging.getLogger("strands").setLevel(logging.DEBUG)
@@ -15,9 +16,15 @@ logging.getLogger("strands").setLevel(logging.DEBUG)
 logging.basicConfig(format="%(levelname)s | %(name)s | %(message)s", handlers=[logging.StreamHandler()])
 
 
+@activity.defn
+async def get_weather_activity() -> str:
+    """Get current weather for a city."""
+    return "Some cool stuff"
+
+
 # Define the weather tool (same as before)
 @tool
-def get_weather(city: str) -> str:
+async def get_weather(city: str) -> str:
     """Get current weather for a city.
 
     Args:
@@ -26,6 +33,9 @@ def get_weather(city: str) -> str:
     Returns:
         Weather description for the city
     """
+    result = await workflow.execute_activity(get_weather_activity, start_to_close_timeout=timedelta(seconds=5))
+    print(f"Result: {result}")
+    print(f"Getting weather for {city}")
     # Mock weather data
     weather_conditions = {
         "seattle": "Rainy and 55°F",

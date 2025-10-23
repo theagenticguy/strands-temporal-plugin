@@ -6,13 +6,11 @@ Single activity that runs the complete Strands agent loop with full durability.
 from pydantic import BaseModel
 
 # Import Strands components (allowed via sandbox passthrough)
-from strands import Agent
-from strands.models import BedrockModel, Model
+from strands.models import BedrockModel
 from strands.types.content import Messages
 from strands.types.streaming import StreamEvent
 from strands.types.tools import ToolSpec
 from temporalio import activity
-from typing import Any
 
 
 class ModelExecutionInput(BaseModel):
@@ -54,7 +52,7 @@ async def execute_strands_model(input_data: ModelExecutionInput) -> ModelExecuti
 
     results = [event async for event in result]
 
-    return ModelExecutionResult(events = results)
+    return ModelExecutionResult(events=results)
 
 
 #
