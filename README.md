@@ -125,31 +125,23 @@ if __name__ == "__main__":
 
 The **DurableAgent** pattern properly separates concerns for Temporal compatibility:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        WORKFLOW CONTEXT                          │
-│                    (Deterministic, Serializable)                 │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │                     DurableAgent                            │ │
-│  │                                                             │ │
-│  │  config: DurableAgentConfig (Pydantic)                      │ │
-│  │  messages: list[dict] (Serializable)                        │ │
-│  │  mcp_tools: list[MCPToolSpec] (Serializable)                │ │
-│  │                                                             │ │
-│  │  invoke(prompt) ───────────────────────────┐               │ │
-│  │     │                                       │               │ │
-│  │     ▼                                       ▼               │ │
-│  │  ┌────────────────────┐     ┌───────────────────────────┐  │ │
-│  │  │ execute_model_     │     │ execute_tool_activity     │  │ │
-│  │  │    activity        │     │                           │  │ │
-│  │  │                    │     │ execute_mcp_tool_activity │  │ │
-│  │  │ (Activity Context) │     │ (Activity Context)        │  │ │
-│  │  │ - AWS credentials  │     │ - Tool execution          │  │ │
-│  │  │ - Model creation   │     │ - MCP connections         │  │ │
-│  │  │ - API calls        │     │ - Retries & timeouts      │  │ │
-│  │  └────────────────────┘     └───────────────────────────┘  │ │
-│  └────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph WF["WORKFLOW CONTEXT<br/>(Deterministic, Serializable)"]
+        subgraph DA["DurableAgent"]
+            Config["config: DurableAgentConfig (Pydantic)<br/>messages: list[dict] (Serializable)<br/>mcp_tools: list[MCPToolSpec] (Serializable)"]
+            Invoke["invoke(prompt)"]
+            Config --> Invoke
+        end
+
+        subgraph Activities["Activity Context"]
+            ModelActivity["execute_model_activity<br/>─────────────────<br/>• AWS credentials<br/>• Model creation<br/>• API calls"]
+            ToolActivity["execute_tool_activity<br/>execute_mcp_tool_activity<br/>─────────────────<br/>• Tool execution<br/>• MCP connections<br/>• Retries & timeouts"]
+        end
+
+        Invoke --> ModelActivity
+        Invoke --> ToolActivity
+    end
 ```
 
 **Key Principles:**

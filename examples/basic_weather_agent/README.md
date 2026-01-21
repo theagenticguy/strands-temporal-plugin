@@ -11,30 +11,23 @@ The weather agent uses:
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        WORKFLOW CONTEXT                          │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │                     DurableAgent                            │ │
-│  │                                                             │ │
-│  │  config: DurableAgentConfig                                 │ │
-│  │    - provider_config: BedrockProviderConfig                 │ │
-│  │    - tool_specs: [WEATHER_TOOL_SPEC]                        │ │
-│  │    - tool_modules: {"get_weather": "tools"}                 │ │
-│  │                                                             │ │
-│  │  invoke(prompt) ───────────────────────────┐               │ │
-│  │     │                                       │               │ │
-│  │     ▼                                       ▼               │ │
-│  │  ┌────────────────────┐     ┌───────────────────────────┐  │ │
-│  │  │ execute_model_call │     │ execute_tool_activity     │  │ │
-│  │  │     (Activity)     │     │      (Activity)           │  │ │
-│  │  │                    │     │                           │  │ │
-│  │  │ - Creates Bedrock  │     │ - Imports tool function   │  │ │
-│  │  │ - Sends messages   │     │ - Executes get_weather    │  │ │
-│  │  │ - Returns response │     │ - Returns ToolResult      │  │ │
-│  │  └────────────────────┘     └───────────────────────────┘  │ │
-│  └────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph WF["WORKFLOW CONTEXT"]
+        subgraph DA["DurableAgent"]
+            Config["config: DurableAgentConfig<br/>─────────────────<br/>• provider_config: BedrockProviderConfig<br/>• tool_specs: [WEATHER_TOOL_SPEC]<br/>• tool_modules: {get_weather: tools}"]
+            Invoke["invoke(prompt)"]
+            Config --> Invoke
+        end
+
+        subgraph Activities["Activities"]
+            ModelActivity["execute_model_call<br/>─────────────────<br/>• Creates Bedrock<br/>• Sends messages<br/>• Returns response"]
+            ToolActivity["execute_tool_activity<br/>─────────────────<br/>• Imports tool function<br/>• Executes get_weather<br/>• Returns ToolResult"]
+        end
+
+        Invoke --> ModelActivity
+        Invoke --> ToolActivity
+    end
 ```
 
 ## Prerequisites

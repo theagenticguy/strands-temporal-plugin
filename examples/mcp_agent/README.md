@@ -13,39 +13,29 @@ MCP allows AI agents to access external tools and resources through a standardiz
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        WORKFLOW CONTEXT                          │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │                     DurableAgent                            │ │
-│  │                                                             │ │
-│  │  mcp_servers: [StdioMCPServerConfig]                        │ │
-│  │  mcp_tools: [MCPToolSpec] (discovered)                      │ │
-│  │                                                             │ │
-│  │  1. _discover_mcp_tools() ─────────────────┐               │ │
-│  │     │                                       │               │ │
-│  │     ▼                                       │               │ │
-│  │  ┌─────────────────────────┐               │               │ │
-│  │  │ list_mcp_tools_activity │               │               │ │
-│  │  │ - Creates MCPClient     │               │               │ │
-│  │  │ - Lists tools           │               │               │ │
-│  │  │ - Returns MCPToolSpec[] │               │               │ │
-│  │  └─────────────────────────┘               │               │ │
-│  │                                             │               │ │
-│  │  2. _execute_model_call() ─────────────────┤               │ │
-│  │     (includes MCP tools)                    │               │ │
-│  │                                             │               │ │
-│  │  3. _execute_mcp_tool_call() ──────────────┘               │ │
-│  │     │                                                       │ │
-│  │     ▼                                                       │ │
-│  │  ┌─────────────────────────┐                               │ │
-│  │  │ execute_mcp_tool_activity │                             │ │
-│  │  │ - Creates MCPClient       │                             │ │
-│  │  │ - Calls tool              │                             │ │
-│  │  │ - Returns result          │                             │ │
-│  │  └─────────────────────────┘                               │ │
-│  └────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph WF["WORKFLOW CONTEXT"]
+        subgraph DA["DurableAgent"]
+            Config["mcp_servers: [StdioMCPServerConfig]<br/>mcp_tools: [MCPToolSpec] (discovered)"]
+
+            Step1["1. _discover_mcp_tools()"]
+            Step2["2. _execute_model_call()<br/>(includes MCP tools)"]
+            Step3["3. _execute_mcp_tool_call()"]
+
+            Config --> Step1
+            Step1 --> Step2
+            Step2 --> Step3
+        end
+
+        subgraph Activities["Activities"]
+            ListTools["list_mcp_tools_activity<br/>─────────────────<br/>• Creates MCPClient<br/>• Lists tools<br/>• Returns MCPToolSpec[]"]
+            ExecTool["execute_mcp_tool_activity<br/>─────────────────<br/>• Creates MCPClient<br/>• Calls tool<br/>• Returns result"]
+        end
+
+        Step1 --> ListTools
+        Step3 --> ExecTool
+    end
 ```
 
 ## Prerequisites
