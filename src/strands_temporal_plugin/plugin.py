@@ -24,32 +24,105 @@ Usage:
 
 from __future__ import annotations
 
-import temporalio.client
-import temporalio.service
-import temporalio.worker
 from .activities import execute_model_activity, execute_tool_activity
 from .mcp_activities import execute_mcp_tool_activity, list_mcp_tools_activity
-from collections.abc import AsyncIterator
-from contextlib import AbstractAsyncContextManager
-from temporalio.client import ClientConfig, WorkflowHistory
-from temporalio.contrib.pydantic import PydanticPayloadConverter
-from temporalio.converter import DataConverter
-from temporalio.worker import Replayer, ReplayerConfig, Worker, WorkerConfig, WorkflowReplayResult
+from collections.abc import Callable, Sequence
+from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.plugin import SimplePlugin
+from temporalio.worker._workflow_instance import WorkflowRunner
 from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
 
 
-class StrandsTemporalPlugin(temporalio.client.Plugin, temporalio.worker.Plugin):
+# Modules that are safe to pass through the sandbox.
+# These should only be data types and pure modules - NO I/O libraries.
+# I/O operations (boto3, httpx, urllib3, etc.) must stay in activities only.
+_SAFE_PASSTHROUGH_MODULES = (
+    # Pydantic (for data models - required for serialization)
+    "pydantic",
+    "pydantic_core",
+    # Strands type definitions only (NOT strands.models which does I/O)
+    "strands.types",
+    "strands.types.content",
+    "strands.types.streaming",
+    "strands.types.tools",
+)
+
+
+def _merge_workflow_runner(existing: WorkflowRunner | None) -> WorkflowRunner:
+    """Merge sandbox restrictions instead of replacing them.
+
+    This callable is used by SimplePlugin to configure the workflow runner.
+    It respects any existing sandbox restrictions from other plugins and
+    adds our passthrough modules on top.
+
+    Args:
+        existing: The existing workflow runner from earlier plugins, if any.
+
+    Returns:
+        A SandboxedWorkflowRunner with merged restrictions.
+    """
+    # Get base restrictions from existing runner or use defaults
+    if existing is None:
+        base_restrictions = SandboxRestrictions.default
+    elif isinstance(existing, SandboxedWorkflowRunner):
+        base_restrictions = existing.restrictions
+    else:
+        # Non-sandboxed runner - start from defaults
+        base_restrictions = SandboxRestrictions.default
+
+    # Add our passthrough modules to existing restrictions
+    merged_restrictions = base_restrictions.with_passthrough_modules(*_SAFE_PASSTHROUGH_MODULES)
+
+    return SandboxedWorkflowRunner(restrictions=merged_restrictions)
+
+
+def _merge_activities(
+    existing: Sequence[Callable] | None,
+) -> Sequence[Callable]:
+    """Merge activities instead of replacing them.
+
+    This callable is used by SimplePlugin to configure activities.
+    It preserves any existing activities from other plugins and adds ours.
+
+    Args:
+        existing: The existing activities from earlier plugins, if any.
+
+    Returns:
+        A sequence containing both existing and plugin activities.
+    """
+    activities: list[Callable] = list(existing) if existing else []
+
+    # Add our activities if not already present
+    plugin_activities = [
+        execute_model_activity,
+        execute_tool_activity,
+        list_mcp_tools_activity,
+        execute_mcp_tool_activity,
+    ]
+
+    for activity in plugin_activities:
+        if activity not in activities:
+            activities.append(activity)
+
+    return activities
+
+
+class StrandsTemporalPlugin(SimplePlugin):
     """Plugin for seamless integration of Strands Agents with Temporal workflows.
 
     This plugin automatically configures Temporal to work with Strands agents by:
     - Setting up Pydantic serialization for Strands types
     - Registering model and tool execution activities
-    - Configuring sandbox restrictions for Strands imports
+    - Configuring sandbox restrictions for safe imports (data types only)
 
     The plugin follows the DurableAgent pattern where:
     - Model inference runs in activities (where credentials exist)
     - Tool execution runs in activities (with proper retries)
     - Workflow orchestrates the agent loop deterministically
+
+    Important: I/O libraries (boto3, httpx, urllib3, etc.) are intentionally NOT
+    passed through the sandbox. They should only be used in activities, not workflows.
+    This ensures workflow determinism during replay.
 
     Example:
         from temporalio.client import Client
@@ -80,105 +153,17 @@ class StrandsTemporalPlugin(temporalio.client.Plugin, temporalio.worker.Plugin):
                 return result.text
     """
 
-    def run_replayer(
-        self, replayer: Replayer, histories: AsyncIterator[WorkflowHistory]
-    ) -> AbstractAsyncContextManager[AsyncIterator[WorkflowReplayResult]]:
-        """Delegate replayer execution to next plugin."""
-        return self.next_worker_plugin.run_replayer(replayer, histories)
+    def __init__(self) -> None:
+        """Initialize the Strands Temporal Plugin.
 
-    def configure_replayer(self, config: ReplayerConfig) -> ReplayerConfig:
-        """Delegate replayer configuration to next plugin."""
-        return self.next_worker_plugin.configure_replayer(config)
-
-    async def run_worker(self, worker: Worker) -> None:
-        """Delegate worker execution to next plugin."""
-        await self.next_worker_plugin.run_worker(worker)
-
-    def init_client_plugin(self, next: temporalio.client.Plugin) -> None:
-        """Initialize client plugin chain."""
-        self.next_client_plugin = next
-
-    async def connect_service_client(
-        self, config: temporalio.service.ConnectConfig
-    ) -> temporalio.service.ServiceClient:
-        """Delegate service client connection to next plugin."""
-        return await self.next_client_plugin.connect_service_client(config)
-
-    def init_worker_plugin(self, next: temporalio.worker.Plugin) -> None:
-        """Initialize worker plugin chain."""
-        self.next_worker_plugin = next
-
-    def configure_client(self, config: ClientConfig) -> ClientConfig:
-        """Configure client with Pydantic data converter.
-
-        This ensures all Pydantic models (including our types) serialize
-        properly through Temporal's payload system.
+        Uses SimplePlugin's declarative approach to configure:
+        - Pydantic data converter for serialization
+        - Activities for model/tool execution (merged with existing)
+        - Sandbox restrictions for safe imports (merged with existing)
         """
-        config["data_converter"] = DataConverter(payload_converter_class=PydanticPayloadConverter)
-        return config
-
-    def configure_worker(self, config: WorkerConfig) -> WorkerConfig:
-        """Configure worker with activities and sandbox restrictions.
-
-        This method:
-        1. Configures sandbox to allow Strands, MCP, and boto3 imports
-        2. Registers model, tool, and MCP execution activities
-        """
-        # Configure sandbox to allow necessary imports
-        # These modules need to pass through the sandbox unchanged
-        custom_restrictions = SandboxRestrictions.default.with_passthrough_modules(
-            # Strands SDK modules
-            "strands",
-            "strands.models",
-            "strands.event_loop",
-            "strands.event_loop.streaming",
-            "strands.types",
-            "strands.types.content",
-            "strands.types.streaming",
-            "strands.types.tools",
-            "strands.tools",
-            "strands.tools.mcp",
-            # MCP SDK modules
-            "mcp",
-            "mcp.client",
-            "mcp.client.streamable_http",
-            "mcp.client.stdio",
-            "mcp.types",
-            # AWS SDK (for BedrockModel)
-            "botocore",
-            "boto3",
-            "urllib3",
-            # HTTP clients
-            "httpx",
-            "aiohttp",
-            # Pydantic (for data models)
-            "pydantic",
-            "pydantic_core",
-            # Anyio (for async support)
-            "anyio",
-            "sniffio",
+        super().__init__(
+            name="strands-temporal-plugin",
+            data_converter=pydantic_data_converter,
+            activities=_merge_activities,
+            workflow_runner=_merge_workflow_runner,
         )
-
-        config["workflow_runner"] = SandboxedWorkflowRunner(restrictions=custom_restrictions)
-
-        # Register activities
-        activities = list(config.get("activities") or [])
-
-        # Add model execution activity
-        if execute_model_activity not in activities:
-            activities.append(execute_model_activity)
-
-        # Add tool execution activity
-        if execute_tool_activity not in activities:
-            activities.append(execute_tool_activity)
-
-        # Add MCP activities
-        if list_mcp_tools_activity not in activities:
-            activities.append(list_mcp_tools_activity)
-
-        if execute_mcp_tool_activity not in activities:
-            activities.append(execute_mcp_tool_activity)
-
-        config["activities"] = activities
-
-        return config

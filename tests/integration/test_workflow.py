@@ -237,25 +237,83 @@ class TestPluginConfiguration:
 
     @pytest.mark.asyncio
     async def test_plugin_registers_activities(self):
-        """Test that the plugin properly configures the worker."""
-        plugin = StrandsTemporalPlugin()
+        """Test that the plugin properly registers all 4 activities."""
+        from strands_temporal_plugin.plugin import _merge_activities
 
-        # Create a mock config
-        config = {"activities": []}
+        # Test with no existing activities
+        result = _merge_activities(None)
+        assert len(result) == 4
 
-        # Configure the worker
-        result_config = plugin.configure_worker(config)
+        # Test with empty list
+        result = _merge_activities([])
+        assert len(result) == 4
 
-        # Should have registered both activities
-        assert len(result_config["activities"]) == 2
+    @pytest.mark.asyncio
+    async def test_plugin_preserves_existing_activities(self):
+        """Test that plugin merges with existing activities instead of replacing."""
+        from strands_temporal_plugin.plugin import _merge_activities
+
+        def custom_activity():
+            pass
+
+        existing = [custom_activity]
+        result = _merge_activities(existing)
+
+        # Should have custom + 4 plugin activities
+        assert len(result) == 5
+        assert custom_activity in result
 
     @pytest.mark.asyncio
     async def test_plugin_configures_sandbox(self):
         """Test that the plugin configures sandbox restrictions."""
+        from strands_temporal_plugin.plugin import _merge_workflow_runner
+        from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner
+
+        # Test with no existing runner
+        runner = _merge_workflow_runner(None)
+        assert isinstance(runner, SandboxedWorkflowRunner)
+
+    @pytest.mark.asyncio
+    async def test_plugin_merges_sandbox_restrictions(self):
+        """Test that plugin merges sandbox restrictions instead of replacing."""
+        from strands_temporal_plugin.plugin import _SAFE_PASSTHROUGH_MODULES, _merge_workflow_runner
+        from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
+
+        # Create an existing runner with custom restrictions
+        custom_module = "some.custom.module"
+        existing_restrictions = SandboxRestrictions.default.with_passthrough_modules(custom_module)
+        existing_runner = SandboxedWorkflowRunner(restrictions=existing_restrictions)
+
+        # Merge with our plugin
+        result_runner = _merge_workflow_runner(existing_runner)
+
+        # Should have both custom and plugin modules
+        assert isinstance(result_runner, SandboxedWorkflowRunner)
+        passthrough = result_runner.restrictions.passthrough_modules
+        assert custom_module in passthrough
+        for module in _SAFE_PASSTHROUGH_MODULES:
+            assert module in passthrough
+
+    @pytest.mark.asyncio
+    async def test_plugin_does_not_passthrough_io_modules(self):
+        """Test that I/O modules are NOT passed through the sandbox."""
+        from strands_temporal_plugin.plugin import _SAFE_PASSTHROUGH_MODULES
+
+        # These I/O modules should NOT be in passthrough
+        io_modules = ["urllib3", "boto3", "botocore", "httpx", "aiohttp"]
+
+        for module in io_modules:
+            assert module not in _SAFE_PASSTHROUGH_MODULES, f"{module} should not be passed through"
+
+    @pytest.mark.asyncio
+    async def test_simpleplugin_initialization(self):
+        """Test that StrandsTemporalPlugin initializes correctly as SimplePlugin."""
+        from temporalio.plugin import SimplePlugin
+
         plugin = StrandsTemporalPlugin()
 
-        config = {"activities": []}
-        result_config = plugin.configure_worker(config)
+        # Should be a SimplePlugin subclass
+        assert isinstance(plugin, SimplePlugin)
 
-        # Should have a workflow runner configured
-        assert "workflow_runner" in result_config
+        # Should have a name
+        assert plugin.name() == "strands-temporal-plugin"
