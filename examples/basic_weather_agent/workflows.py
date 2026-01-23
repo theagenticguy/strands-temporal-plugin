@@ -1,18 +1,28 @@
-"""Weather Agent Workflow using DurableAgent Pattern
+"""Weather Agent Workflows
 
-This example demonstrates how to create a Temporal workflow that uses
-the DurableAgent class for durable AI agent execution.
+This example demonstrates two patterns for running Strands agents with Temporal:
 
-Key concepts:
-1. DurableAgent runs entirely within workflow context
-2. Model calls are routed to activities (where credentials exist)
-3. Tool calls are routed to activities (with proper retries)
-4. All state is serializable through Pydantic models
+1. **FullyDurableWeatherAgent** (RECOMMENDED): Uses the real Strands Agent loop
+   with both TemporalModelStub AND TemporalToolExecutor for full durability.
+   Both model calls and tool calls are routed to Temporal activities.
+
+2. **StrandsWeatherAgent**: Uses just TemporalModelStub (model durability only).
+   Tools execute in workflow context - use only for pure functions without I/O.
+
+All patterns provide durable AI agent execution through Temporal.
 """
 
 import logging
-from strands_temporal_plugin import BedrockProviderConfig, DurableAgent, DurableAgentConfig
 from temporalio import workflow
+
+
+# Import strands with sandbox passthrough to avoid I/O library restrictions
+# This allows using the Agent class in workflow context while the actual
+# model/tool I/O happens in activities
+with workflow.unsafe.imports_passed_through():
+    from strands import Agent
+    from strands_temporal_plugin import BedrockProviderConfig, TemporalModelStub, create_durable_agent
+    from tools import get_weather
 
 
 # Configure logging
@@ -23,46 +33,96 @@ logging.basicConfig(
 )
 
 
-# Tool specification for the weather tool
-# This defines what the model knows about the tool
-# Note: Bedrock Converse API requires inputSchema to be wrapped in {"json": ...}
-WEATHER_TOOL_SPEC = {
-    "name": "get_weather",
-    "description": "Get the current weather for a city. Use this when the user asks about weather conditions.",
-    "inputSchema": {
-        "json": {
-            "type": "object",
-            "properties": {
-                "city": {
-                    "type": "string",
-                    "description": "The name of the city to get weather for",
-                }
-            },
-            "required": ["city"],
-        }
-    },
-}
+# =============================================================================
+# RECOMMENDED: Full Durability with create_durable_agent()
+# =============================================================================
 
 
 @workflow.defn
-class WeatherAgentWorkflow:
-    """Weather agent workflow using the DurableAgent pattern.
+class FullyDurableWeatherAgent:
+    """Weather agent with FULL durability for both model AND tools (RECOMMENDED).
 
-    This workflow demonstrates the proper way to run AI agents
-    within Temporal for full durability guarantees.
+    This workflow uses create_durable_agent() which configures:
+    - TemporalModelStub: Routes model.stream() calls to activities
+    - TemporalToolExecutor: Routes tool execution to activities
 
-    The DurableAgent:
-    - Keeps all state serializable in the workflow
-    - Routes model calls to activities (where AWS credentials exist)
-    - Routes tool calls to activities (with proper retries)
-    - Orchestrates the agent loop deterministically
+    This provides complete durability while preserving all Strands features
+    (callbacks, hooks, conversation history, etc.).
+
+    Use this pattern when:
+    - Your tools do I/O (API calls, file access, etc.)
+    - You need retry and timeout handling for tool calls
+    - You want workflow replay to work correctly
 
     Example usage:
-        # Start the workflow
         result = await client.execute_workflow(
-            WeatherAgentWorkflow.run,
-            "What's the weather in Seattle?",
-            id="weather-agent-1",
+            FullyDurableWeatherAgent.run,
+            "What's the weather in Seattle and Tokyo?",
+            id="fully-durable-weather-1",
+            task_queue="strands-agents",
+        )
+    """
+
+    @workflow.run
+    async def run(self, prompt: str) -> str:
+        """Run the weather agent with full durability.
+
+        Args:
+            prompt: User's weather question
+
+        Returns:
+            Weather information response
+        """
+        # Create a fully durable agent using the factory function
+        # Both model calls AND tool calls are routed to Temporal activities
+        agent = create_durable_agent(
+            provider_config=BedrockProviderConfig(
+                model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+                max_tokens=4096,
+            ),
+            tools=[get_weather],
+            tool_modules={"get_weather": "tools"},  # Module path for activity
+            system_prompt=(
+                "You are a helpful weather assistant. "
+                "You can get current weather information for cities using your weather tool. "
+                "Always use the get_weather tool when users ask about weather conditions. "
+                "Provide friendly, informative responses about the weather."
+            ),
+        )
+
+        # Use the real Strands Agent loop with full durability!
+        result = await agent.invoke_async(prompt)
+
+        return str(result)
+
+
+# =============================================================================
+# Alternative: Model-Only Durability (for pure function tools)
+# =============================================================================
+
+
+@workflow.defn
+class StrandsWeatherAgent:
+    """Weather agent with MODEL-ONLY durability.
+
+    This workflow uses Strands Agent with just TemporalModelStub, which:
+    - Preserves the full Strands Agent event loop
+    - Routes model.stream() calls to Temporal activities for durability
+    - Tools execute in WORKFLOW context (no activity durability)
+
+    Use this pattern when:
+    - Your tools are pure functions (no I/O)
+    - You don't need retry handling for tool calls
+    - You want simpler configuration
+
+    WARNING: If your tools do I/O (API calls, file access, etc.), use
+    FullyDurableWeatherAgent instead!
+
+    Example usage:
+        result = await client.execute_workflow(
+            StrandsWeatherAgent.run,
+            "What's the weather in Seattle and Tokyo?",
+            id="strands-weather-1",
             task_queue="strands-agents",
         )
     """
@@ -77,58 +137,37 @@ class WeatherAgentWorkflow:
         Returns:
             Weather information response
         """
-        # Create the agent configuration
-        # This is fully serializable and defines how the agent should behave
-        config = DurableAgentConfig(
-            # Model provider configuration
-            provider_config=BedrockProviderConfig(
-                model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
-                max_tokens=4096,
+        # Create a real Strands Agent with TemporalModelStub
+        # The stub routes model calls to Temporal activities
+        agent = Agent(
+            model=TemporalModelStub(
+                BedrockProviderConfig(
+                    model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+                    max_tokens=4096,
+                )
             ),
-            # System prompt for the agent
+            tools=[get_weather],  # Use @tool decorated function directly!
             system_prompt=(
                 "You are a helpful weather assistant. "
                 "You can get current weather information for cities using your weather tool. "
                 "Always use the get_weather tool when users ask about weather conditions. "
                 "Provide friendly, informative responses about the weather."
             ),
-            # Tool specifications - what tools the model knows about
-            tool_specs=[WEATHER_TOOL_SPEC],
-            # Tool module mapping - where to find the actual tool implementations
-            # The activity will dynamically import these when executing tools
-            # Use just "tools" since we run from the examples/basic_weather_agent directory
-            tool_modules={
-                "get_weather": "tools",
-            },
-            # Activity timeout configuration
-            model_activity_timeout=300.0,  # 5 minutes for model calls
-            tool_activity_timeout=30.0,  # 30 seconds for tool calls
-            # Retry configuration
-            max_retries=3,
-            initial_retry_interval_seconds=1.0,
-            backoff_coefficient=2.0,
         )
 
-        # Create the DurableAgent
-        agent = DurableAgent(config)
+        # Use the real Strands Agent loop!
+        # This preserves all agent features while getting Temporal durability
+        result = await agent.invoke_async(prompt)
 
-        # Invoke the agent - this orchestrates the full agent loop
-        # 1. Sends prompt to model (via activity)
-        # 2. If model requests tool use, executes tools (via activity)
-        # 3. Sends tool results back to model (via activity)
-        # 4. Repeats until model returns final response
-        result = await agent.invoke(prompt)
-
-        # Return the final text response
-        return result.text
+        return str(result)
 
 
 @workflow.defn
 class SimpleAgentWorkflow:
-    """Simple agent workflow without tools.
+    """Simple agent without tools.
 
-    This demonstrates the simplest possible DurableAgent usage -
-    just a model with a system prompt, no tools.
+    Demonstrates the simplest possible agent usage - just a model
+    with a system prompt, no tools.
     """
 
     @workflow.run
@@ -141,13 +180,12 @@ class SimpleAgentWorkflow:
         Returns:
             Agent's response
         """
-        config = DurableAgentConfig(
-            provider_config=BedrockProviderConfig(
-                model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+        agent = Agent(
+            model=TemporalModelStub(
+                BedrockProviderConfig(model_id="us.anthropic.claude-sonnet-4-20250514-v1:0")
             ),
             system_prompt="You are a helpful assistant. Answer questions clearly and concisely.",
         )
 
-        agent = DurableAgent(config)
-        result = await agent.invoke(prompt)
-        return result.text
+        result = await agent.invoke_async(prompt)
+        return str(result)

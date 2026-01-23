@@ -17,10 +17,11 @@ Usage:
 """
 
 import asyncio
+from mcp_workflow import MCPDiscoveryWorkflow, SimpleMCPWorkflow
 from strands_temporal_plugin import StrandsTemporalPlugin
 from temporalio.client import Client
 from temporalio.worker import Worker
-from workflows import SimpleAgentWorkflow, WeatherAgentWorkflow
+from workflows import FullyDurableWeatherAgent, SimpleAgentWorkflow, StrandsWeatherAgent
 
 
 async def main():
@@ -41,13 +42,19 @@ async def main():
     worker = Worker(
         client,
         task_queue="strands-agents",
-        workflows=[WeatherAgentWorkflow, SimpleAgentWorkflow],
+        workflows=[
+            FullyDurableWeatherAgent,  # RECOMMENDED: Full durability
+            StrandsWeatherAgent,  # Model-only durability
+            SimpleAgentWorkflow,
+            MCPDiscoveryWorkflow,  # MCP tool discovery
+            SimpleMCPWorkflow,  # Simple MCP pattern
+        ],
         # Note: Activities are auto-registered by the plugin
     )
 
     print("Worker configuration:")
     print("  - Task queue: strands-agents")
-    print("  - Workflows: WeatherAgentWorkflow, SimpleAgentWorkflow")
+    print("  - Workflows: FullyDurableWeatherAgent, StrandsWeatherAgent, MCPDiscoveryWorkflow, SimpleMCPWorkflow")
     print()
     print("Plugin automatically handles:")
     print("  - Model execution activity (execute_model_activity)")

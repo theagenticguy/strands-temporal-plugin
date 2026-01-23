@@ -1,11 +1,15 @@
 """Weather tools for the example agent.
 
-These tools are executed in activity context by the DurableAgent.
-The tool module path is specified in the DurableAgentConfig so that
-the activity can dynamically load and execute the tool.
+These tools are decorated with @tool and used directly by Strands Agent.
+The tool execution happens within the Strands Agent event loop.
+
+For the DurableAgent pattern (alternative), see tools_durable.py.
 """
 
+from strands import tool
 
+
+@tool
 def get_weather(city: str) -> str:
     """Get current weather for a city.
 

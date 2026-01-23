@@ -378,48 +378,31 @@ class MCPToolExecutionResult(BaseModel):
 
 
 # =============================================================================
-# Durable Agent Configuration
+# Tool Executor Configuration
 # =============================================================================
 
 
-class DurableAgentConfig(BaseModel):
-    """Configuration for a DurableAgent.
+class ToolExecutorConfig(BaseModel):
+    """Configuration for TemporalToolExecutor.
 
-    This configuration is fully serializable and can be passed
-    between workflows and activities.
+    This configuration specifies how tools should be executed via Temporal
+    activities, including module paths for static tools and MCP server
+    configurations for dynamic tool discovery.
 
-    The agent supports three types of tools:
-    1. Static tools: Defined via tool_specs + tool_modules (function-based)
-    2. MCP tools: Dynamically discovered from MCP servers
-
-    Example with MCP servers:
-        config = DurableAgentConfig(
-            provider_config=BedrockProviderConfig(
-                model_id="us.anthropic.claude-sonnet-4-20250514-v1:0"
-            ),
-            system_prompt="You are a documentation assistant.",
+    Example:
+        config = ToolExecutorConfig(
+            tool_modules={"get_weather": "myapp.tools"},
             mcp_servers=[
                 StdioMCPServerConfig(
                     server_id="aws-docs",
                     command="uvx",
                     args=["awslabs.aws-documentation-mcp-server@latest"],
-                    tool_prefix="docs",
                 ),
             ],
         )
     """
 
     model_config = ConfigDict(extra="forbid")
-
-    # Model provider configuration
-    provider_config: ProviderConfig
-
-    # System prompt for the agent
-    system_prompt: str | None = None
-
-    # Static tool specifications (serialized ToolSpec list)
-    # Note: actual tool functions cannot be serialized, only their specs
-    tool_specs: list[dict[str, Any]] = Field(default_factory=list)
 
     # Tool module paths for dynamic import in activity context
     # Maps tool name to module path (e.g., {"get_weather": "my_module.tools"})
@@ -429,36 +412,16 @@ class DurableAgentConfig(BaseModel):
     mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
 
     # Activity execution configuration
-    model_activity_timeout: float = 300.0  # 5 minutes default
-    tool_activity_timeout: float = 60.0  # 1 minute default
-    mcp_activity_timeout: float = 120.0  # 2 minutes default for MCP operations
+    activity_timeout: float = 60.0  # 1 minute default
 
-    # Retry configuration (serialized to avoid RetryPolicy serialization issues)
+    # Retry configuration
     max_retries: int = 3
     initial_retry_interval_seconds: float = 1.0
-    max_retry_interval_seconds: float = 60.0
+    max_retry_interval_seconds: float = 30.0
     backoff_coefficient: float = 2.0
 
-    def get_model_retry_policy(self) -> RetryPolicy:
-        """Get RetryPolicy for model activities."""
-        return RetryPolicy(
-            maximum_attempts=self.max_retries,
-            initial_interval=timedelta(seconds=self.initial_retry_interval_seconds),
-            maximum_interval=timedelta(seconds=self.max_retry_interval_seconds),
-            backoff_coefficient=self.backoff_coefficient,
-        )
-
-    def get_tool_retry_policy(self) -> RetryPolicy:
+    def get_retry_policy(self) -> RetryPolicy:
         """Get RetryPolicy for tool activities."""
-        return RetryPolicy(
-            maximum_attempts=self.max_retries,
-            initial_interval=timedelta(seconds=self.initial_retry_interval_seconds),
-            maximum_interval=timedelta(seconds=self.max_retry_interval_seconds),
-            backoff_coefficient=self.backoff_coefficient,
-        )
-
-    def get_mcp_retry_policy(self) -> RetryPolicy:
-        """Get RetryPolicy for MCP activities."""
         return RetryPolicy(
             maximum_attempts=self.max_retries,
             initial_interval=timedelta(seconds=self.initial_retry_interval_seconds),

@@ -40,11 +40,21 @@ _SAFE_PASSTHROUGH_MODULES = (
     # Pydantic (for data models - required for serialization)
     "pydantic",
     "pydantic_core",
-    # Strands type definitions only (NOT strands.models which does I/O)
+    # Strands type definitions (NOT strands.models which does I/O)
     "strands.types",
     "strands.types.content",
     "strands.types.streaming",
     "strands.types.tools",
+    "strands.types.event",
+    "strands.types._events",  # TypedEvent and event classes (needed for tool executor)
+    "strands.types.event_loop",
+    # Strands tool executor base class (for TemporalToolExecutor)
+    # The base class is needed in workflow context for the Agent to use
+    "strands.tools",
+    "strands.tools.executor",
+    # Strands agent core (for Agent class - models do I/O but are replaced)
+    "strands.agent",
+    # Note: strands.models is NOT passed through - use TemporalModelStub instead
 )
 
 
