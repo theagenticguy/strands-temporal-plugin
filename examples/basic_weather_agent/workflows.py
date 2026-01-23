@@ -81,7 +81,6 @@ class FullyDurableWeatherAgent:
                 max_tokens=4096,
             ),
             tools=[get_weather],
-            tool_modules={"get_weather": "tools"},  # Module path for activity
             system_prompt=(
                 "You are a helpful weather assistant. "
                 "You can get current weather information for cities using your weather tool. "

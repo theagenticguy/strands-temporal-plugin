@@ -1,6 +1,6 @@
 # Strands Temporal Plugin
 
-A production-grade integration between [Strands Agents SDK](https://github.com/strands-agents/sdk-python) and [Temporal](https://temporal.io/) for durable AI agent execution.
+An integration between [Strands Agents SDK](https://github.com/strands-agents/sdk-python) and [Temporal](https://temporal.io/) for durable AI agent execution.
 
 ## Features
 
@@ -68,7 +68,6 @@ class WeatherWorkflow:
                     model_id="us.anthropic.claude-sonnet-4-20250514-v1:0"
                 ),
                 tools=[get_weather],
-                tool_modules={"get_weather": "myapp.tools"},
                 system_prompt="You are a weather assistant.",
             )
 
@@ -197,7 +196,6 @@ class MyWorkflow:
                     model_id="us.anthropic.claude-sonnet-4-20250514-v1:0"
                 ),
                 tools=[api_call],
-                tool_modules={"api_call": "myapp.tools"},
                 system_prompt="You are a helpful assistant.",
             )
         result = await agent.invoke_async(prompt)
@@ -315,7 +313,6 @@ agent = create_durable_agent(
         max_tokens=4096,
     ),
     tools=[...],
-    tool_modules={...},
 )
 ```
 
@@ -331,7 +328,6 @@ agent = create_durable_agent(
         max_tokens=4096,
     ),
     tools=[...],
-    tool_modules={...},
 )
 ```
 
@@ -347,7 +343,6 @@ agent = create_durable_agent(
         max_tokens=4096,
     ),
     tools=[...],
-    tool_modules={...},
 )
 ```
 
@@ -362,7 +357,6 @@ agent = create_durable_agent(
         host="http://localhost:11434",
     ),
     tools=[...],
-    tool_modules={...},
 )
 ```
 
@@ -392,11 +386,8 @@ def get_weather(city: str) -> str:
 agent = create_durable_agent(
     provider_config=BedrockProviderConfig(model_id="..."),
     tools=[get_weather],
-    tool_modules={"get_weather": "myapp.tools"},
 )
 ```
-
-The `tool_modules` mapping tells Temporal how to dynamically import your tool function in the activity context for execution.
 
 ## MCP Tools
 
@@ -467,27 +458,27 @@ StdioMCPServerConfig(
 
 Factory function for creating a fully durable Strands Agent.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `provider_config` | `ProviderConfig` | Required | LLM provider configuration |
-| `tools` | `list[Any]` | `None` | List of `@tool` decorated functions |
-| `tool_modules` | `dict[str, str]` | `None` | Tool name to module path mapping |
-| `system_prompt` | `str \| None` | `None` | System prompt for the agent |
-| `mcp_servers` | `list[MCPServerConfig]` | `None` | MCP server configurations |
-| `model_timeout` | `float` | `300.0` | Model call timeout (seconds) |
-| `tool_timeout` | `float` | `60.0` | Tool execution timeout |
-| `**agent_kwargs` | `Any` | - | Additional kwargs passed to Agent constructor |
+| Parameter         | Type                    | Default  | Description                                   |
+| ----------------- | ----------------------- | -------- | --------------------------------------------- |
+| `provider_config` | `ProviderConfig`        | Required | LLM provider configuration                    |
+| `tools`           | `list[Any]`             | `None`   | List of `@tool` decorated functions           |
+| `tool_modules`    | `dict[str, str]`        | `None`   | Tool name to module path mapping              |
+| `system_prompt`   | `str \| None`           | `None`   | System prompt for the agent                   |
+| `mcp_servers`     | `list[MCPServerConfig]` | `None`   | MCP server configurations                     |
+| `model_timeout`   | `float`                 | `300.0`  | Model call timeout (seconds)                  |
+| `tool_timeout`    | `float`                 | `60.0`   | Tool execution timeout                        |
+| `**agent_kwargs`  | `Any`                   | -        | Additional kwargs passed to Agent constructor |
 
 ### TemporalToolExecutor
 
 Custom tool executor that routes tool calls to Temporal activities.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `tool_modules` | `dict[str, str]` | `{}` | Tool name to module path mapping |
-| `mcp_servers` | `list[MCPServerConfig]` | `[]` | MCP server configurations |
-| `activity_timeout` | `float` | `60.0` | Tool activity timeout (seconds) |
-| `retry_policy` | `RetryPolicy \| None` | `None` | Custom retry policy |
+| Parameter          | Type                    | Default | Description                      |
+| ------------------ | ----------------------- | ------- | -------------------------------- |
+| `tool_modules`     | `dict[str, str]`        | `{}`    | Tool name to module path mapping |
+| `mcp_servers`      | `list[MCPServerConfig]` | `[]`    | MCP server configurations        |
+| `activity_timeout` | `float`                 | `60.0`  | Tool activity timeout (seconds)  |
+| `retry_policy`     | `RetryPolicy \| None`   | `None`  | Custom retry policy              |
 
 **Methods:**
 - `discover_mcp_tools()` - Discover tools from MCP servers
@@ -498,11 +489,11 @@ Custom tool executor that routes tool calls to Temporal activities.
 
 Model stub that routes `model.stream()` calls to Temporal activities.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `config` | `ProviderConfig` | Provider configuration (Bedrock, OpenAI, etc.) |
-| `activity_timeout` | `float` | Model activity timeout (default: 300s) |
-| `retry_policy` | `RetryPolicy \| None` | Custom retry policy |
+| Parameter          | Type                  | Description                                    |
+| ------------------ | --------------------- | ---------------------------------------------- |
+| `config`           | `ProviderConfig`      | Provider configuration (Bedrock, OpenAI, etc.) |
+| `activity_timeout` | `float`               | Model activity timeout (default: 300s)         |
+| `retry_policy`     | `RetryPolicy \| None` | Custom retry policy                            |
 
 ## Examples
 

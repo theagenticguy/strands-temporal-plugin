@@ -43,7 +43,6 @@ Usage (Full durability - RECOMMENDED):
             agent = create_durable_agent(
                 provider_config=BedrockProviderConfig(model_id="..."),
                 tools=[get_weather],
-                tool_modules={"get_weather": "myapp.tools"},
                 system_prompt="You are helpful.",
             )
             result = await agent.invoke_async(prompt)
@@ -103,6 +102,51 @@ from strands.types.tools import ToolSpec
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 from typing import Any
+
+
+def _extract_tool_modules(tools: list[Any]) -> dict[str, str]:
+    """Extract module paths from @tool decorated functions.
+
+    Args:
+        tools: List of @tool decorated functions
+
+    Returns:
+        Dictionary mapping tool names to module paths
+
+    Raises:
+        ValueError: If a tool is defined in __main__ module or lacks attributes
+    """
+    tool_modules = {}
+
+    for tool in tools:
+        # Get tool name
+        tool_name = getattr(tool, 'tool_name', None) or getattr(tool, '__name__', None)
+        if not tool_name:
+            raise ValueError(
+                f"Cannot determine tool name for {tool}. "
+                f"Ensure it's a @tool decorated function."
+            )
+
+        # Get module path
+        module = getattr(tool, '__module__', None)
+        if not module:
+            raise ValueError(
+                f"Cannot determine module for tool '{tool_name}'. "
+                f"Provide explicit tool_modules mapping."
+            )
+
+        # Handle __main__ edge case
+        if module == '__main__':
+            raise ValueError(
+                f"Tool '{tool_name}' is defined in __main__ module which cannot be "
+                f"re-imported in activity workers. Move the tool to a separate "
+                f"importable module (e.g., myapp/tools.py) or provide an explicit "
+                f"tool_modules mapping."
+            )
+
+        tool_modules[tool_name] = module
+
+    return tool_modules
 
 
 class TemporalModelStub:
@@ -272,7 +316,9 @@ def create_durable_agent(
     Args:
         provider_config: Configuration for the model provider (Bedrock, Anthropic, etc.)
         tools: List of @tool decorated functions to use with the agent
-        tool_modules: Mapping of tool names to module paths for activity execution
+        tool_modules: (Optional) Tool name to module path mapping.
+                     If not provided, automatically extracted from tools.
+                     Provide this to override auto-discovery for specific tools.
                      Example: {"get_weather": "myapp.tools"}
         system_prompt: System prompt for the agent
         mcp_servers: Optional list of MCP server configurations for tool discovery
@@ -301,7 +347,6 @@ def create_durable_agent(
                         model_id="us.anthropic.claude-sonnet-4-20250514-v1:0"
                     ),
                     tools=[get_weather],
-                    tool_modules={"get_weather": "myapp.tools"},
                     system_prompt="You are a helpful weather assistant.",
                 )
 
@@ -355,6 +400,20 @@ def create_durable_agent(
     from .tool_executor import TemporalToolExecutor
     from strands import Agent
 
+    # Auto-discover tool modules if tools provided
+    auto_modules = {}
+    if tools:
+        try:
+            auto_modules = _extract_tool_modules(tools)
+        except ValueError:
+            # If auto-discovery fails and no explicit mapping provided, re-raise
+            if not tool_modules:
+                raise
+            # Otherwise, continue with explicit mapping
+
+    # Merge: explicit tool_modules takes precedence over auto-discovered
+    merged_modules = {**auto_modules, **(tool_modules or {})}
+
     # Create model stub
     model_stub = TemporalModelStub(
         provider_config=provider_config,
@@ -363,7 +422,7 @@ def create_durable_agent(
 
     # Create tool executor
     tool_executor = TemporalToolExecutor(
-        tool_modules=tool_modules or {},
+        tool_modules=merged_modules,
         mcp_servers=mcp_servers,
         activity_timeout=tool_timeout,
     )

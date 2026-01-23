@@ -18,6 +18,7 @@ Usage:
 
 import asyncio
 from mcp_workflow import MCPDiscoveryWorkflow, SimpleMCPWorkflow
+from http_mcp_workflow import HTTPMCPWorkflow, AWSKnowledgeMCPWorkflow
 from strands_temporal_plugin import StrandsTemporalPlugin
 from temporalio.client import Client
 from temporalio.worker import Worker
@@ -46,15 +47,23 @@ async def main():
             FullyDurableWeatherAgent,  # RECOMMENDED: Full durability
             StrandsWeatherAgent,  # Model-only durability
             SimpleAgentWorkflow,
-            MCPDiscoveryWorkflow,  # MCP tool discovery
-            SimpleMCPWorkflow,  # Simple MCP pattern
+            MCPDiscoveryWorkflow,  # MCP tool discovery (stdio)
+            SimpleMCPWorkflow,  # Simple MCP pattern (stdio)
+            HTTPMCPWorkflow,  # Generic HTTP MCP
+            AWSKnowledgeMCPWorkflow,  # AWS Knowledge HTTP MCP
         ],
         # Note: Activities are auto-registered by the plugin
     )
 
     print("Worker configuration:")
     print("  - Task queue: strands-agents")
-    print("  - Workflows: FullyDurableWeatherAgent, StrandsWeatherAgent, MCPDiscoveryWorkflow, SimpleMCPWorkflow")
+    print("  - Workflows:")
+    print("      • FullyDurableWeatherAgent (static tools)")
+    print("      • StrandsWeatherAgent (model-only durability)")
+    print("      • MCPDiscoveryWorkflow (stdio MCP)")
+    print("      • SimpleMCPWorkflow (stdio MCP)")
+    print("      • HTTPMCPWorkflow (HTTP MCP)")
+    print("      • AWSKnowledgeMCPWorkflow (AWS Knowledge HTTP MCP)")
     print()
     print("Plugin automatically handles:")
     print("  - Model execution activity (execute_model_activity)")
