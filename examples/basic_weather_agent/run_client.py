@@ -16,7 +16,7 @@ import sys
 import uuid
 from strands_temporal_plugin import StrandsTemporalPlugin
 from temporalio.client import Client
-from workflows import SimpleAgentWorkflow, WeatherAgentWorkflow
+from workflows import FullyDurableWeatherAgent, SimpleAgentWorkflow, StrandsWeatherAgent
 
 
 async def run_single_query():
@@ -34,14 +34,14 @@ async def run_single_query():
     # Example query
     query = "What's the weather like in Seattle?"
     print(f"Query: {query}")
-    print("Processing...")
+    print("Processing with FullyDurableWeatherAgent (full model + tool durability)...")
     print()
 
-    # Execute the workflow
+    # Execute the workflow using the recommended FullyDurableWeatherAgent
     result = await client.execute_workflow(
-        WeatherAgentWorkflow.run,
+        FullyDurableWeatherAgent.run,
         query,
-        id=f"weather-agent-{uuid.uuid4().hex[:8]}",
+        id=f"fully-durable-agent-{uuid.uuid4().hex[:8]}",
         task_queue="strands-agents",
     )
 
@@ -62,12 +62,16 @@ async def run_interactive():
 
     print("Connected to Temporal!")
     print("Type weather questions or 'exit' to quit.")
-    print("Type 'simple' followed by a question to use SimpleAgentWorkflow.")
+    print()
+    print("Prefixes:")
+    print("  (default)  - Use FullyDurableWeatherAgent (RECOMMENDED: full durability)")
+    print("  model:     - Use StrandsWeatherAgent (model-only durability)")
+    print("  simple:    - Use SimpleAgentWorkflow (no tools)")
     print()
     print("Examples:")
     print("  What's the weather in Seattle?")
-    print("  How's the weather in Tokyo?")
-    print("  simple What is the capital of France?")
+    print("  model: How's the weather in Tokyo?")
+    print("  simple: What is the capital of France?")
     print()
 
     while True:
@@ -80,15 +84,19 @@ async def run_interactive():
             if user_input.lower() in ["exit", "quit", "q"]:
                 break
 
-            # Check if user wants simple workflow
-            if user_input.lower().startswith("simple "):
-                prompt = user_input[7:]  # Remove "simple " prefix
+            # Check which workflow to use
+            if user_input.lower().startswith("simple:"):
+                prompt = user_input[7:].strip()
                 workflow = SimpleAgentWorkflow
                 workflow_name = "SimpleAgentWorkflow"
+            elif user_input.lower().startswith("model:"):
+                prompt = user_input[6:].strip()
+                workflow = StrandsWeatherAgent
+                workflow_name = "StrandsWeatherAgent (model-only)"
             else:
                 prompt = user_input
-                workflow = WeatherAgentWorkflow
-                workflow_name = "WeatherAgentWorkflow"
+                workflow = FullyDurableWeatherAgent
+                workflow_name = "FullyDurableWeatherAgent"
 
             print(f"Running {workflow_name}...")
 

@@ -4,7 +4,6 @@ import json
 from strands_temporal_plugin.types import (
     AnthropicProviderConfig,
     BedrockProviderConfig,
-    DurableAgentConfig,
     ModelExecutionInput,
     ModelExecutionResult,
     OllamaProviderConfig,
@@ -214,78 +213,6 @@ class TestToolExecutionTypes:
         )
 
         assert result.status == "error"
-
-
-class TestDurableAgentConfig:
-    """Test DurableAgentConfig."""
-
-    def test_durable_agent_config_minimal(self):
-        """Test DurableAgentConfig with minimal fields."""
-        config = DurableAgentConfig(provider_config=BedrockProviderConfig(model_id="anthropic.claude-3-sonnet"))
-
-        assert config.provider_config.model_id == "anthropic.claude-3-sonnet"
-        assert config.system_prompt is None
-        assert config.tool_specs == []
-        assert config.tool_modules == {}
-        assert config.model_activity_timeout == 300.0
-        assert config.max_retries == 3
-
-    def test_durable_agent_config_full(self, sample_tool_spec):
-        """Test DurableAgentConfig with all fields."""
-        config = DurableAgentConfig(
-            provider_config=BedrockProviderConfig(
-                model_id="anthropic.claude-3-sonnet",
-                max_tokens=8192,
-            ),
-            system_prompt="You are a helpful assistant.",
-            tool_specs=[sample_tool_spec],
-            tool_modules={"get_weather": "my_app.tools"},
-            model_activity_timeout=600.0,
-            tool_activity_timeout=120.0,
-            max_retries=5,
-            initial_retry_interval_seconds=2.0,
-        )
-
-        assert config.system_prompt == "You are a helpful assistant."
-        assert config.tool_specs == [sample_tool_spec]
-        assert config.tool_modules == {"get_weather": "my_app.tools"}
-        assert config.model_activity_timeout == 600.0
-        assert config.max_retries == 5
-
-    def test_durable_agent_config_retry_policy(self):
-        """Test DurableAgentConfig retry policy generation."""
-        config = DurableAgentConfig(
-            provider_config=BedrockProviderConfig(model_id="anthropic.claude-3-sonnet"),
-            max_retries=5,
-            initial_retry_interval_seconds=2.0,
-            max_retry_interval_seconds=120.0,
-            backoff_coefficient=3.0,
-        )
-
-        policy = config.get_model_retry_policy()
-
-        assert policy.maximum_attempts == 5
-        assert policy.initial_interval.total_seconds() == 2.0
-        assert policy.maximum_interval.total_seconds() == 120.0
-        assert policy.backoff_coefficient == 3.0
-
-    def test_durable_agent_config_serialization(self, sample_tool_spec):
-        """Test DurableAgentConfig JSON serialization."""
-        config = DurableAgentConfig(
-            provider_config=BedrockProviderConfig(
-                model_id="anthropic.claude-3-sonnet",
-            ),
-            system_prompt="Test",
-            tool_specs=[sample_tool_spec],
-            tool_modules={"get_weather": "my_app.tools"},
-        )
-
-        json_str = config.model_dump_json()
-        restored = DurableAgentConfig.model_validate_json(json_str)
-
-        assert restored.provider_config.model_id == config.provider_config.model_id
-        assert restored.system_prompt == config.system_prompt
-        assert restored.tool_specs == config.tool_specs
 
 
 class TestSerializationHelpers:

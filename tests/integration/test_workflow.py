@@ -7,13 +7,12 @@ workflow execution with mocked activities.
 import pytest
 from strands_temporal_plugin import (
     BedrockProviderConfig,
-    DurableAgent,
-    DurableAgentConfig,
     ModelExecutionInput,
     ModelExecutionResult,
     StrandsTemporalPlugin,
     ToolExecutionInput,
     ToolExecutionResult,
+    create_durable_agent,
 )
 from temporalio import activity, workflow
 from temporalio.testing import WorkflowEnvironment
@@ -144,10 +143,19 @@ class SimpleAgentWorkflow:
 
     @workflow.run
     async def run(self, prompt: str) -> str:
-        config = DurableAgentConfig(provider_config=BedrockProviderConfig(model_id="anthropic.claude-3-sonnet"))
-        agent = DurableAgent(config)
-        result = await agent.invoke(prompt)
-        return result.text
+        # Import Agent with sandbox passthrough
+        with workflow.unsafe.imports_passed_through():
+            agent = create_durable_agent(
+                provider_config=BedrockProviderConfig(model_id="anthropic.claude-3-sonnet"),
+            )
+        result = await agent.invoke_async(prompt)
+        return str(result)
+
+
+# Define a test tool for ToolAgentWorkflow
+def get_weather(city: str) -> str:
+    """Get weather for a city."""
+    return f"Weather in {city}: Sunny, 72°F"
 
 
 @workflow.defn
@@ -156,27 +164,31 @@ class ToolAgentWorkflow:
 
     @workflow.run
     async def run(self, prompt: str) -> str:
-        config = DurableAgentConfig(
-            provider_config=BedrockProviderConfig(model_id="anthropic.claude-3-sonnet"),
-            system_prompt="You are a weather assistant.",
-            tool_specs=[
-                {
-                    "name": "get_weather",
-                    "description": "Get weather for a city",
-                    "inputSchema": {
-                        "json": {
-                            "type": "object",
-                            "properties": {"city": {"type": "string"}},
-                            "required": ["city"],
-                        }
-                    },
-                }
-            ],
-            tool_modules={"get_weather": "tests.integration.test_workflow"},
-        )
-        agent = DurableAgent(config)
-        result = await agent.invoke(prompt)
-        return result.text
+        # Import Agent and tool with sandbox passthrough
+        with workflow.unsafe.imports_passed_through():
+            from strands import tool
+
+            # Decorate the test tool
+            weather_tool = tool(
+                name="get_weather",
+                description="Get weather for a city",
+                inputSchema={
+                    "json": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    }
+                },
+            )(get_weather)
+
+            agent = create_durable_agent(
+                provider_config=BedrockProviderConfig(model_id="anthropic.claude-3-sonnet"),
+                system_prompt="You are a weather assistant.",
+                tools=[weather_tool],
+                tool_modules={"get_weather": "tests.integration.test_workflow"},
+            )
+        result = await agent.invoke_async(prompt)
+        return str(result)
 
 
 # =============================================================================
@@ -190,12 +202,15 @@ class TestSimpleWorkflow:
     @pytest.mark.asyncio
     async def test_simple_agent_response(self):
         """Test that a simple agent workflow returns expected response."""
+        from strands_temporal_plugin.plugin import _merge_workflow_runner
+
         async with await WorkflowEnvironment.start_time_skipping() as env:
             async with Worker(
                 env.client,
                 task_queue="test-queue",
                 workflows=[SimpleAgentWorkflow],
                 activities=[mock_execute_model_activity, mock_execute_tool_activity],
+                workflow_runner=_merge_workflow_runner(None),
             ):
                 result = await env.client.execute_workflow(
                     SimpleAgentWorkflow.run,
@@ -214,12 +229,15 @@ class TestToolWorkflow:
     @pytest.mark.asyncio
     async def test_tool_agent_with_weather(self):
         """Test that an agent workflow can use tools."""
+        from strands_temporal_plugin.plugin import _merge_workflow_runner
+
         async with await WorkflowEnvironment.start_time_skipping() as env:
             async with Worker(
                 env.client,
                 task_queue="test-queue",
                 workflows=[ToolAgentWorkflow],
                 activities=[mock_execute_model_activity, mock_execute_tool_activity],
+                workflow_runner=_merge_workflow_runner(None),
             ):
                 result = await env.client.execute_workflow(
                     ToolAgentWorkflow.run,
