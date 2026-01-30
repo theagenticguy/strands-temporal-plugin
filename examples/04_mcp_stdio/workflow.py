@@ -1,39 +1,28 @@
-"""MCP Tool Discovery Workflow Example
+"""MCP Stdio Workflows - Local MCP Server Integration
 
-This example demonstrates how to use MCP (Model Context Protocol) servers
-with the TemporalToolExecutor for durable tool discovery and execution.
+This example demonstrates using MCP (Model Context Protocol) servers
+that run as local processes via stdio communication.
 
-The workflow:
-1. Discovers tools from MCP servers via Temporal activity
-2. Creates a Strands Agent with the discovered tools
-3. Executes the agent with full durability
+Stdio MCP servers are ideal for:
+- Local development and testing
+- Self-contained MCP tools (mcp-server-time, mcp-server-filesystem)
+- When you have the MCP server installed locally
 
-Usage:
-    # Start Temporal server first:
-    temporal server start-dev
-
-    # Run the worker (from examples/basic_weather_agent):
-    uv run python run_worker.py
-
-    # Run this example:
-    uv run python mcp_workflow.py
+Key concepts:
+- StdioMCPServerConfig: Configure local MCP servers
+- TemporalToolExecutor: Discovers and executes MCP tools durably
+- discover_mcp_tools(): Fetch available tools from MCP server
 """
 
-import asyncio
 import logging
-import uuid
 from temporalio import workflow
-from temporalio.client import Client
-from temporalio.worker import Worker
 
-
-# Import strands with sandbox passthrough to avoid I/O library restrictions
+# Import strands with sandbox passthrough
 with workflow.unsafe.imports_passed_through():
     from strands import Agent
     from strands_temporal_plugin import (
         BedrockProviderConfig,
         StdioMCPServerConfig,
-        StrandsTemporalPlugin,
         TemporalModelStub,
         TemporalToolExecutor,
     )
@@ -48,14 +37,23 @@ logger = logging.getLogger(__name__)
 class MCPDiscoveryWorkflow:
     """Workflow demonstrating MCP tool discovery and execution.
 
-    This workflow shows the full pattern for using MCP tools:
-    1. Configure MCP servers
+    This workflow shows the full pattern for using stdio MCP tools:
+    1. Configure MCP servers (command + args)
     2. Discover tools via activity (durable)
     3. Create agent with discovered tools
     4. Execute with full durability
 
-    Note: This example uses a hypothetical MCP server. Replace with
-    your actual MCP server configuration.
+    Example usage:
+        result = await client.execute_workflow(
+            MCPDiscoveryWorkflow.run,
+            args=[
+                "What time is it in Tokyo?",  # prompt
+                "uvx",                         # server_command
+                ["mcp-server-time"],           # server_args
+            ],
+            id="mcp-stdio-1",
+            task_queue="strands-mcp-stdio",
+        )
     """
 
     @workflow.run
@@ -121,9 +119,13 @@ class MCPDiscoveryWorkflow:
 
 @workflow.defn
 class SimpleMCPWorkflow:
-    """Simpler MCP workflow without dynamic server configuration.
+    """Simpler MCP workflow with pre-configured server.
 
-    Use this pattern when you have a fixed MCP server configuration.
+    Use this pattern when you have a fixed MCP server configuration
+    and don't need dynamic server selection.
+
+    This example uses the filesystem MCP server to demonstrate
+    file operations.
     """
 
     @workflow.run
@@ -161,97 +163,8 @@ class SimpleMCPWorkflow:
             ),
             tool_executor=tool_executor,
             tools=tool_executor.get_mcp_tools(),  # Proxy tools for Agent
-            system_prompt="You are a helpful assistant.",
+            system_prompt="You are a helpful assistant with filesystem access.",
         )
 
         result = await agent.invoke_async(prompt)
         return str(result)
-
-
-async def run_mcp_example():
-    """Run the MCP workflow example."""
-    print("MCP Tool Discovery Workflow Example")
-    print("====================================")
-    print()
-    print("This example demonstrates MCP tool discovery with Temporal durability.")
-    print()
-
-    # Connect to Temporal
-    client = await Client.connect(
-        "localhost:7233",
-        plugins=[StrandsTemporalPlugin()],
-    )
-
-    # For this demo, we use mcp-server-time which provides time/timezone tools
-    # Other MCP servers you could use:
-    # - uvx mcp-server-filesystem /path
-    # - uvx awslabs.aws-documentation-mcp-server@latest
-
-    print("NOTE: This demo uses the mcp-server-time MCP server.")
-    print()
-
-    # Try with time MCP server
-    try:
-        print("Attempting to run with time MCP server...")
-        print()
-
-        result = await client.execute_workflow(
-            MCPDiscoveryWorkflow.run,
-            args=[
-                "What time is it in Tokyo, Japan?",  # prompt
-                "uvx",  # server_command
-                ["mcp-server-time"],  # server_args
-            ],
-            id=f"mcp-discovery-{uuid.uuid4().hex[:8]}",
-            task_queue="strands-agents",
-        )
-
-        print(f"Result: {result}")
-
-    except Exception as e:
-        print(f"Error: {e}")
-        print()
-        print("The MCP server might not be available. To run this example:")
-        print("1. Make sure the MCP server works: uvx mcp-server-time --help")
-        print("2. Start the worker: uv run python run_worker.py")
-        print("3. Run this script again")
-
-
-async def run_worker_with_mcp():
-    """Run a worker that includes MCP workflows."""
-    print("Starting worker with MCP workflows...")
-
-    client = await Client.connect(
-        "localhost:7233",
-        plugins=[StrandsTemporalPlugin()],
-    )
-
-    # Import other workflows
-    from workflows import DurableWeatherAgent, FullyDurableWeatherAgent, SimpleAgentWorkflow, StrandsWeatherAgent
-
-    worker = Worker(
-        client,
-        task_queue="strands-agents",
-        workflows=[
-            FullyDurableWeatherAgent,
-            StrandsWeatherAgent,
-            DurableWeatherAgent,
-            SimpleAgentWorkflow,
-            MCPDiscoveryWorkflow,  # Add MCP workflow
-            SimpleMCPWorkflow,
-        ],
-    )
-
-    print("Worker started with MCP workflows")
-    print("Press Ctrl+C to stop")
-
-    await worker.run()
-
-
-if __name__ == "__main__":
-    import sys
-
-    if len(sys.argv) > 1 and sys.argv[1] == "--worker":
-        asyncio.run(run_worker_with_mcp())
-    else:
-        asyncio.run(run_mcp_example())

@@ -125,7 +125,7 @@ class StrandsTemporalPlugin(SimplePlugin):
     - Registering model and tool execution activities
     - Configuring sandbox restrictions for safe imports (data types only)
 
-    The plugin follows the DurableAgent pattern where:
+    The plugin enables the durable agent pattern where:
     - Model inference runs in activities (where credentials exist)
     - Tool execution runs in activities (with proper retries)
     - Workflow orchestrates the agent loop deterministically
@@ -137,7 +137,11 @@ class StrandsTemporalPlugin(SimplePlugin):
     Example:
         from temporalio.client import Client
         from temporalio.worker import Worker
-        from strands_temporal_plugin import StrandsTemporalPlugin, DurableAgent
+        from strands_temporal_plugin import (
+            StrandsTemporalPlugin,
+            create_durable_agent,
+            BedrockProviderConfig,
+        )
 
         # Connect with plugin
         client = await Client.connect(
@@ -153,14 +157,18 @@ class StrandsTemporalPlugin(SimplePlugin):
             # Note: activities auto-registered by plugin
         )
 
-        # In your workflow, use DurableAgent
+        # In your workflow, use create_durable_agent()
         @workflow.defn
         class WeatherWorkflow:
             @workflow.run
             async def run(self, prompt: str) -> str:
-                agent = DurableAgent(config=DurableAgentConfig(...))
-                result = await agent.invoke(prompt)
-                return result.text
+                agent = create_durable_agent(
+                    provider_config=BedrockProviderConfig(model_id="..."),
+                    tools=[get_weather],
+                    system_prompt="You are helpful.",
+                )
+                result = await agent.invoke_async(prompt)
+                return str(result)
     """
 
     def __init__(self) -> None:

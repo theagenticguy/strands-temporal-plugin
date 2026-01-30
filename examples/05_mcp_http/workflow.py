@@ -1,32 +1,21 @@
-"""HTTP MCP Server Workflow Example
+"""MCP HTTP Workflows - Remote MCP Server Integration
 
 This example demonstrates using remote HTTP-based MCP servers instead of
-local stdio-based servers. HTTP MCP servers are ideal for:
+local stdio-based servers.
+
+HTTP MCP servers are ideal for:
 - Cloud-hosted MCP services
 - Enterprise MCP gateways
 - Shared MCP infrastructure
+- Production deployments
 
 Key Differences from stdio MCP:
 - stdio: Spawns local process (uvx mcp-server-time)
 - HTTP: Makes HTTP requests to remote server (https://knowledge-mcp.global.api.aws)
-
-Usage:
-    # Start Temporal server first:
-    temporal server start-dev
-
-    # Run the worker (from examples/basic_weather_agent):
-    uv run python run_worker.py
-
-    # Run this example:
-    uv run python http_mcp_workflow.py
 """
 
-import asyncio
 import logging
-import uuid
 from temporalio import workflow
-from temporalio.client import Client
-
 
 # Import strands with sandbox passthrough
 with workflow.unsafe.imports_passed_through():
@@ -34,7 +23,6 @@ with workflow.unsafe.imports_passed_through():
     from strands_temporal_plugin import (
         BedrockProviderConfig,
         StreamableHTTPMCPServerConfig,
-        StrandsTemporalPlugin,
         TemporalModelStub,
         TemporalToolExecutor,
     )
@@ -53,14 +41,31 @@ class HTTPMCPWorkflow:
     instead of spawning local processes via stdio.
 
     Benefits of HTTP MCP:
-    - No need to install MCP server locally (no uvx/npx)
+    - No need to install MCP server locally
     - Centralized MCP infrastructure
     - Easier authentication and rate limiting
     - Better for production deployments
+
+    Example usage:
+        result = await client.execute_workflow(
+            HTTPMCPWorkflow.run,
+            args=[
+                "Tell me about AWS Lambda",                    # prompt
+                "https://knowledge-mcp.global.api.aws",        # mcp_url
+                {},                                            # mcp_headers
+            ],
+            id="mcp-http-1",
+            task_queue="strands-mcp-http",
+        )
     """
 
     @workflow.run
-    async def run(self, prompt: str, mcp_url: str, mcp_headers: dict[str, str] | None = None) -> str:
+    async def run(
+        self,
+        prompt: str,
+        mcp_url: str,
+        mcp_headers: dict[str, str] | None = None,
+    ) -> str:
         """Run with HTTP-based MCP server.
 
         Args:
@@ -121,9 +126,10 @@ class HTTPMCPWorkflow:
 class AWSKnowledgeMCPWorkflow:
     """Pre-configured workflow for AWS Knowledge MCP server.
 
-    This is a convenience workflow with AWS Knowledge MCP server pre-configured.
     The AWS Knowledge MCP server provides tools for searching AWS documentation,
     best practices, and service information.
+
+    This is a convenience workflow with the server pre-configured.
     """
 
     @workflow.run
@@ -171,90 +177,3 @@ class AWSKnowledgeMCPWorkflow:
 
         result = await agent.invoke_async(prompt)
         return str(result)
-
-
-async def run_http_mcp_example():
-    """Run the HTTP MCP workflow example."""
-    print("HTTP MCP Server Workflow Example")
-    print("=================================")
-    print()
-    print("This example demonstrates using remote HTTP-based MCP servers.")
-    print()
-
-    # Connect to Temporal
-    client = await Client.connect(
-        "localhost:7233",
-        plugins=[StrandsTemporalPlugin()],
-    )
-
-    print("NOTE: This demo uses the AWS Knowledge HTTP MCP server.")
-    print("URL: https://knowledge-mcp.global.api.aws")
-    print()
-
-    # Try with AWS Knowledge MCP server
-    try:
-        print("Attempting to run with AWS Knowledge HTTP MCP server...")
-        print()
-
-        result = await client.execute_workflow(
-            AWSKnowledgeMCPWorkflow.run,
-            "What is Amazon S3 and what are its key features?",
-            id=f"http-mcp-aws-{uuid.uuid4().hex[:8]}",
-            task_queue="strands-agents",
-        )
-
-        print(f"Result: {result}")
-
-    except Exception as e:
-        print(f"Error: {e}")
-        print()
-        print("Troubleshooting:")
-        print("1. Check if the AWS Knowledge MCP server is accessible")
-        print("2. Verify network connectivity to https://knowledge-mcp.global.api.aws")
-        print("3. Make sure the worker is running: uv run python run_worker.py")
-
-
-async def run_generic_http_mcp():
-    """Run with a generic HTTP MCP server (with custom configuration)."""
-    print("Generic HTTP MCP Server Example")
-    print("================================")
-    print()
-
-    client = await Client.connect(
-        "localhost:7233",
-        plugins=[StrandsTemporalPlugin()],
-    )
-
-    # Example with custom HTTP MCP server
-    # Replace with your actual MCP server URL
-    mcp_url = "https://knowledge-mcp.global.api.aws"
-    mcp_headers = {}  # Add authentication headers if needed
-
-    print(f"Using HTTP MCP server: {mcp_url}")
-    print()
-
-    try:
-        result = await client.execute_workflow(
-            HTTPMCPWorkflow.run,
-            args=[
-                "Tell me about AWS Lambda",  # prompt
-                mcp_url,  # mcp_url
-                mcp_headers,  # mcp_headers
-            ],
-            id=f"http-mcp-generic-{uuid.uuid4().hex[:8]}",
-            task_queue="strands-agents",
-        )
-
-        print(f"Result: {result}")
-
-    except Exception as e:
-        print(f"Error: {e}")
-
-
-if __name__ == "__main__":
-    import sys
-
-    if len(sys.argv) > 1 and sys.argv[1] == "--generic":
-        asyncio.run(run_generic_http_mcp())
-    else:
-        asyncio.run(run_http_mcp_example())
