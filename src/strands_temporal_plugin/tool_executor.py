@@ -289,9 +289,9 @@ class TemporalToolExecutor:
     def get_mcp_tool_specs(self) -> list[dict[str, Any]]:
         """Get MCP tools in Strands ToolSpec format (raw dicts).
 
-        Note: These are raw tool specifications for use with DurableAgent
-        or for passing to model calls. For use with the standard Strands Agent,
-        use get_mcp_tools() instead which returns proxy AgentTool instances.
+        Note: These are raw tool specifications for passing to model calls.
+        For use with the standard Strands Agent, use get_mcp_tools() instead
+        which returns proxy AgentTool instances.
 
         Returns:
             List of tool specifications in Strands format

@@ -427,15 +427,14 @@ def _convert_mcp_result_to_content(result: Any) -> list[dict[str, Any]]:
 
 
 # =============================================================================
-# Helper Functions for DurableAgent
+# Helper Functions for Tool Conversion
 # =============================================================================
 
 
 def mcp_tool_specs_to_strands(mcp_specs: list[MCPToolSpec]) -> list[dict[str, Any]]:
     """Convert a list of MCPToolSpec to Strands ToolSpec format.
 
-    This is used by DurableAgent to merge MCP tools with static tools
-    for model calls.
+    This is used to merge MCP tools with static tools for model calls.
 
     Args:
         mcp_specs: List of MCPToolSpec from list_mcp_tools_activity
