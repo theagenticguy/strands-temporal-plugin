@@ -31,6 +31,14 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _safe_heartbeat(detail: str) -> None:
+    """Send a heartbeat if running in activity context, otherwise no-op."""
+    try:
+        activity.heartbeat(detail)
+    except RuntimeError:
+        pass
+
+
 # =============================================================================
 # MCP Client Factory
 # =============================================================================
@@ -261,7 +269,7 @@ async def list_mcp_tools_activity(input_data: MCPListToolsInput) -> MCPListTools
             logger.info(f"MCP tools listed: server={server_config.server_id}, count={len(tool_specs)}")
 
             # Heartbeat progress
-            activity.heartbeat(f"Listed {len(tool_specs)} tools from {server_config.server_id}")
+            _safe_heartbeat(f"Listed {len(tool_specs)} tools from {server_config.server_id}")
 
             return MCPListToolsResult(tools=tool_specs)
 
@@ -325,12 +333,14 @@ async def execute_mcp_tool_activity(input_data: MCPToolExecutionInput) -> MCPToo
 
     try:
         # Create MCP client
+        _safe_heartbeat("connecting")
         mcp_client = _create_mcp_client(server_config)
 
         # Connect and call tool
         with mcp_client:
             # Call the tool (using actual name without prefix)
             # Signature: call_tool_sync(tool_use_id, name, arguments)
+            _safe_heartbeat("executing")
             result = mcp_client.call_tool_sync(input_data.tool_use_id, actual_tool_name, input_data.tool_input)
 
             # Convert result to serializable format

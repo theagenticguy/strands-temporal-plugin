@@ -13,6 +13,7 @@ Activities properly handle:
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 from .types import ModelExecutionInput, ModelExecutionResult, ToolExecutionInput, ToolExecutionResult
@@ -22,6 +23,18 @@ from typing import Any
 
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_heartbeat(detail: str) -> None:
+    """Send a heartbeat if running in activity context, otherwise no-op.
+
+    This allows activities to be tested outside of Temporal's activity context
+    without wrapping every heartbeat call in try/except.
+    """
+    try:
+        activity.heartbeat(detail)
+    except RuntimeError:
+        pass
 
 
 # =============================================================================
@@ -193,7 +206,7 @@ async def execute_model_activity(input_data: ModelExecutionInput) -> ModelExecut
 
             # Heartbeat every 10 events to show progress
             if event_count % 10 == 0:
-                activity.heartbeat(f"Processed {event_count} events")
+                _safe_heartbeat(f"Processed {event_count} events")
 
         logger.info(f"Model activity completed: {len(events)} events collected")
 
@@ -308,6 +321,7 @@ async def execute_tool_activity(input_data: ToolExecutionInput) -> ToolExecution
 
     try:
         # Load the tool function
+        _safe_heartbeat("loading tool")
         tool_func = _load_tool_function(input_data.tool_name, input_data.tool_module)
 
         # Get the actual function if it's a Strands @tool decorated function
@@ -319,8 +333,25 @@ async def execute_tool_activity(input_data: ToolExecutionInput) -> ToolExecution
         # Execute the tool
         import inspect
 
+        _safe_heartbeat("executing")
+
         if inspect.iscoroutinefunction(actual_func):
-            result = await actual_func(**input_data.tool_input)
+
+            async def _heartbeat_periodically(interval: float = 10.0):
+                """Background heartbeat for long-running async tools."""
+                while True:
+                    await asyncio.sleep(interval)
+                    _safe_heartbeat("still executing")
+
+            heartbeat_task = asyncio.create_task(_heartbeat_periodically())
+            try:
+                result = await actual_func(**input_data.tool_input)
+            finally:
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
         else:
             result = actual_func(**input_data.tool_input)
 
@@ -336,11 +367,13 @@ async def execute_tool_activity(input_data: ToolExecutionInput) -> ToolExecution
         else:
             content = [{"text": str(result)}]
 
+        status = "success"
+        _safe_heartbeat(f"completed: {status}")
         logger.info(f"Tool activity completed: tool={input_data.tool_name}")
 
         return ToolExecutionResult(
             tool_use_id=input_data.tool_use_id,
-            status="success",
+            status=status,
             content=content,
         )
 
@@ -351,8 +384,10 @@ async def execute_tool_activity(input_data: ToolExecutionInput) -> ToolExecution
     except Exception as e:
         logger.exception(f"Tool execution failed: {input_data.tool_name}: {e}")
 
+        status = "error"
+        _safe_heartbeat(f"completed: {status}")
         return ToolExecutionResult(
             tool_use_id=input_data.tool_use_id,
-            status="error",
+            status=status,
             content=[{"text": f"Tool execution failed: {e}"}],
         )

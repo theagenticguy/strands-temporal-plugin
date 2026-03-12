@@ -65,6 +65,7 @@ Architecture:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from .activities import execute_tool_activity
 from .mcp_activities import (
@@ -278,9 +279,7 @@ class TemporalToolExecutor:
                 retry_policy=self._retry_policy,
             )
 
-            logger.info(
-                f"Discovered {len(result.tools)} tools from MCP server: {server_config.server_id}"
-            )
+            logger.info(f"Discovered {len(result.tools)} tools from MCP server: {server_config.server_id}")
             self._mcp_tools.extend(result.tools)
 
         logger.info(f"Total MCP tools discovered: {len(self._mcp_tools)}")
@@ -343,6 +342,11 @@ class TemporalToolExecutor:
         need to be executed. It routes each tool call to an appropriate
         Temporal activity.
 
+        For workflows started after the parallel-tool-execution-v1 patch,
+        multiple tool calls from a single model response are executed
+        concurrently via asyncio.gather(). Older workflows replay with
+        sequential execution for compatibility.
+
         Args:
             agent: The Strands Agent instance
             tool_uses: List of tool use requests from the model
@@ -355,46 +359,62 @@ class TemporalToolExecutor:
         Yields:
             TypedEvent: Tool result events (ToolResultEvent instances)
         """
-        for tool_use in tool_uses:
-            tool_name = tool_use["name"]
-            tool_input = tool_use.get("input", {})
-            tool_use_id = tool_use["toolUseId"]
+        if workflow.patched("parallel-tool-execution-v1"):
+            # Parallel: launch all tool activities concurrently
+            results = await asyncio.gather(*[self._execute_single_tool(tool_use) for tool_use in tool_uses])
+            for result in results:
+                tool_result: ToolResult = {
+                    "toolUseId": result.tool_use_id,
+                    "status": result.status,
+                    "content": result.content,
+                }
+                tool_results.append(tool_result)
+                yield ToolResultEvent(tool_result=tool_result)
+        else:
+            # Sequential: original behavior for replay compatibility with pre-v1 workflows
+            for tool_use in tool_uses:
+                result = await self._execute_single_tool(tool_use)
+                tool_result: ToolResult = {
+                    "toolUseId": result.tool_use_id,
+                    "status": result.status,
+                    "content": result.content,
+                }
+                tool_results.append(tool_result)
+                yield ToolResultEvent(tool_result=tool_result)
 
-            logger.info(f"Executing tool via activity: {tool_name}")
+    async def _execute_single_tool(self, tool_use: ToolUse) -> ToolExecutionResult:
+        """Execute a single tool via the appropriate Temporal activity.
 
-            # Check if this is an MCP tool
-            mcp_info = get_mcp_server_for_tool(tool_name, self._mcp_tools)
+        Routes to either MCP or static tool execution based on tool registration.
 
-            if mcp_info is not None:
-                # MCP tool - execute via MCP activity
-                server_id, mcp_spec = mcp_info
-                result = await self._execute_mcp_tool(
-                    server_id=server_id,
-                    tool_name=tool_name,
-                    tool_input=tool_input,
-                    tool_use_id=tool_use_id,
-                )
-            else:
-                # Static tool - execute via regular tool activity
-                result = await self._execute_static_tool(
-                    tool_name=tool_name,
-                    tool_input=tool_input,
-                    tool_use_id=tool_use_id,
-                )
+        Args:
+            tool_use: Tool use request from the model
 
-            # Build ToolResult in Strands format
-            tool_result: ToolResult = {
-                "toolUseId": result.tool_use_id,
-                "status": result.status,
-                "content": result.content,
-            }
+        Returns:
+            ToolExecutionResult with tool output
+        """
+        tool_name = tool_use["name"]
+        tool_input = tool_use.get("input", {})
+        tool_use_id = tool_use["toolUseId"]
 
-            # Append to results list (Strands convention)
-            tool_results.append(tool_result)
+        logger.info(f"Executing tool via activity: {tool_name}")
 
-            # Yield proper ToolResultEvent (TypedEvent subclass)
-            # This is required by Strands' event loop which calls event.prepare()
-            yield ToolResultEvent(tool_result=tool_result)
+        mcp_info = get_mcp_server_for_tool(tool_name, self._mcp_tools)
+
+        if mcp_info is not None:
+            server_id, mcp_spec = mcp_info
+            return await self._execute_mcp_tool(
+                server_id=server_id,
+                tool_name=tool_name,
+                tool_input=tool_input,
+                tool_use_id=tool_use_id,
+            )
+        else:
+            return await self._execute_static_tool(
+                tool_name=tool_name,
+                tool_input=tool_input,
+                tool_use_id=tool_use_id,
+            )
 
     async def _execute_static_tool(
         self,
@@ -416,18 +436,12 @@ class TemporalToolExecutor:
 
         if not tool_module:
             logger.warning(
-                f"No module path found for tool '{tool_name}'. "
-                f"Registered modules: {list(self._tool_modules.keys())}"
+                f"No module path found for tool '{tool_name}'. Registered modules: {list(self._tool_modules.keys())}"
             )
             return ToolExecutionResult(
                 tool_use_id=tool_use_id,
                 status="error",
-                content=[
-                    {
-                        "text": f"Tool '{tool_name}' not found. "
-                        f"Make sure it's registered in tool_modules."
-                    }
-                ],
+                content=[{"text": f"Tool '{tool_name}' not found. Make sure it's registered in tool_modules."}],
             )
 
         activity_input = ToolExecutionInput(

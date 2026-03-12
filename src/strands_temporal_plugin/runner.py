@@ -120,23 +120,17 @@ def _extract_tool_modules(tools: list[Any]) -> dict[str, str]:
 
     for tool in tools:
         # Get tool name
-        tool_name = getattr(tool, 'tool_name', None) or getattr(tool, '__name__', None)
+        tool_name = getattr(tool, "tool_name", None) or getattr(tool, "__name__", None)
         if not tool_name:
-            raise ValueError(
-                f"Cannot determine tool name for {tool}. "
-                f"Ensure it's a @tool decorated function."
-            )
+            raise ValueError(f"Cannot determine tool name for {tool}. Ensure it's a @tool decorated function.")
 
         # Get module path
-        module = getattr(tool, '__module__', None)
+        module = getattr(tool, "__module__", None)
         if not module:
-            raise ValueError(
-                f"Cannot determine module for tool '{tool_name}'. "
-                f"Provide explicit tool_modules mapping."
-            )
+            raise ValueError(f"Cannot determine module for tool '{tool_name}'. Provide explicit tool_modules mapping.")
 
         # Handle __main__ edge case
-        if module == '__main__':
+        if module == "__main__":
             raise ValueError(
                 f"Tool '{tool_name}' is defined in __main__ module which cannot be "
                 f"re-imported in activity workers. Move the tool to a separate "
@@ -248,25 +242,44 @@ class TemporalModelStub:
         Yields:
             StreamEvent: Events from the model inference
         """
-        # Build activity input
-        activity_input = ModelExecutionInput(
-            provider_config=self._provider_config,
-            messages=list(messages) if messages else None,
-            tool_specs=list(tool_specs) if tool_specs else None,
-            system_prompt=system_prompt,
-        )
+        # Versioning gate for future streaming changes (e.g., S3-backed session loading)
+        # Currently both paths are identical — this establishes the patch point so future
+        # changes to model invocation logic can branch safely without breaking replay.
+        if workflow.patched("model-stream-v1"):
+            activity_input = ModelExecutionInput(
+                provider_config=self._provider_config,
+                messages=list(messages) if messages else None,
+                tool_specs=list(tool_specs) if tool_specs else None,
+                system_prompt=system_prompt,
+            )
 
-        # Execute via activity
-        result: ModelExecutionResult = await workflow.execute_activity(
-            execute_model_activity,
-            activity_input,
-            start_to_close_timeout=timedelta(seconds=self._activity_timeout),
-            retry_policy=self._retry_policy,
-        )
+            result: ModelExecutionResult = await workflow.execute_activity(
+                execute_model_activity,
+                activity_input,
+                start_to_close_timeout=timedelta(seconds=self._activity_timeout),
+                retry_policy=self._retry_policy,
+            )
 
-        # Yield collected events
-        for event in result.events:
-            yield event
+            for event in result.events:
+                yield event
+        else:
+            # Original behavior for replay compatibility
+            activity_input = ModelExecutionInput(
+                provider_config=self._provider_config,
+                messages=list(messages) if messages else None,
+                tool_specs=list(tool_specs) if tool_specs else None,
+                system_prompt=system_prompt,
+            )
+
+            result: ModelExecutionResult = await workflow.execute_activity(
+                execute_model_activity,
+                activity_input,
+                start_to_close_timeout=timedelta(seconds=self._activity_timeout),
+                retry_policy=self._retry_policy,
+            )
+
+            for event in result.events:
+                yield event
 
     async def structured_output(
         self,
