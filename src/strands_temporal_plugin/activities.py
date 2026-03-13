@@ -64,9 +64,14 @@ def _create_model_from_config(provider_config: Any) -> Any:
     Raises:
         ApplicationError: If provider is not supported
     """
+    # IMPORTANT: Disable SDK-level retries for all providers.
+    # Temporal handles retries at the activity level with configurable policies.
+    # Having both SDK retries AND Temporal retries causes double-retry behavior.
+
     provider = provider_config.provider
 
     if provider == "bedrock":
+        from botocore.config import Config as BotoConfig
         from strands.models import BedrockModel
 
         # Build kwargs from config, excluding None values
@@ -82,6 +87,8 @@ def _create_model_from_config(provider_config: Any) -> Any:
             kwargs["top_p"] = provider_config.top_p
         if provider_config.stop_sequences:
             kwargs["stop_sequences"] = provider_config.stop_sequences
+
+        kwargs["boto_client_config"] = BotoConfig(retries={"max_attempts": 0, "mode": "standard"})
 
         return BedrockModel(**kwargs)
 
@@ -105,6 +112,8 @@ def _create_model_from_config(provider_config: Any) -> Any:
         if provider_config.stop_sequences:
             kwargs["stop_sequences"] = provider_config.stop_sequences
 
+        kwargs["max_retries"] = 0
+
         return AnthropicModel(**kwargs)
 
     elif provider == "openai":
@@ -125,6 +134,8 @@ def _create_model_from_config(provider_config: Any) -> Any:
         if provider_config.top_p is not None:
             kwargs["top_p"] = provider_config.top_p
 
+        kwargs["max_retries"] = 0
+
         return OpenAIModel(**kwargs)
 
     elif provider == "ollama":
@@ -137,6 +148,7 @@ def _create_model_from_config(provider_config: Any) -> Any:
                 non_retryable=True,
             ) from e
 
+        # Ollama runs locally — no SDK retry config needed
         kwargs = {"model_id": provider_config.model_id}
         if provider_config.host:
             kwargs["host"] = provider_config.host
@@ -149,6 +161,8 @@ def _create_model_from_config(provider_config: Any) -> Any:
 
     elif provider == "custom":
         # Pluggable provider via import path
+        # NOTE: Custom providers should disable their own SDK-level retries.
+        # Temporal handles retries at the activity level.
         try:
             provider_class_path = provider_config.provider_class_path
             module_path, class_name = provider_class_path.rsplit(".", 1)

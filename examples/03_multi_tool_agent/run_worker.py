@@ -34,6 +34,7 @@ from workflows import (
     FinanceAssistant,
     GeneralAssistant,
     NotificationAgent,
+    PerToolConfigAssistant,
     ResearchAssistant,
     WeatherAssistant,
 )
@@ -66,6 +67,7 @@ async def main():
             FinanceAssistant,
             GeneralAssistant,
             ConversationalAssistant,
+            PerToolConfigAssistant,
         ],
         # Note: Activities are auto-registered by StrandsTemporalPlugin
     )
@@ -79,6 +81,7 @@ async def main():
     print("  - FinanceAssistant       : Stock prices + calculations")
     print("  - GeneralAssistant       : All tools combined")
     print("  - ConversationalAssistant: Multi-turn with context")
+    print("  - PerToolConfigAssistant : Per-tool timeout/retry config")
     print()
     print("Task Queue: durable-agents")
     print()

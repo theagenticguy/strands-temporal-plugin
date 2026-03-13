@@ -473,19 +473,14 @@ class TemporalToolExecutor:
         tool_config = self._tool_configs.get(tool_name)
         timeout = tool_config.start_to_close_timeout if tool_config and tool_config.start_to_close_timeout else self._activity_timeout
         retry = tool_config.get_retry_policy(self._retry_policy) if tool_config else self._retry_policy
-        heartbeat_timeout = timedelta(seconds=tool_config.heartbeat_timeout) if tool_config and tool_config.heartbeat_timeout else None
-
-        activity_kwargs: dict[str, Any] = {
-            "start_to_close_timeout": timedelta(seconds=timeout),
-            "retry_policy": retry,
-        }
-        if heartbeat_timeout:
-            activity_kwargs["heartbeat_timeout"] = heartbeat_timeout
+        heartbeat_timeout = timedelta(seconds=tool_config.heartbeat_timeout) if tool_config and tool_config.heartbeat_timeout else timedelta(seconds=25)
 
         result: ToolExecutionResult = await workflow.execute_activity(
             execute_tool_activity,
             activity_input,
-            **activity_kwargs,
+            start_to_close_timeout=timedelta(seconds=timeout),
+            retry_policy=retry,
+            heartbeat_timeout=heartbeat_timeout,
         )
 
         return result
@@ -528,19 +523,14 @@ class TemporalToolExecutor:
         tool_config = self._tool_configs.get(tool_name)
         timeout = tool_config.start_to_close_timeout if tool_config and tool_config.start_to_close_timeout else self._activity_timeout
         retry = tool_config.get_retry_policy(self._retry_policy) if tool_config else self._retry_policy
-        heartbeat_timeout = timedelta(seconds=tool_config.heartbeat_timeout) if tool_config and tool_config.heartbeat_timeout else None
-
-        activity_kwargs: dict[str, Any] = {
-            "start_to_close_timeout": timedelta(seconds=timeout),
-            "retry_policy": retry,
-        }
-        if heartbeat_timeout:
-            activity_kwargs["heartbeat_timeout"] = heartbeat_timeout
+        heartbeat_timeout = timedelta(seconds=tool_config.heartbeat_timeout) if tool_config and tool_config.heartbeat_timeout else timedelta(seconds=25)
 
         result: MCPToolExecutionResult = await workflow.execute_activity(
             execute_mcp_tool_activity,
             activity_input,
-            **activity_kwargs,
+            start_to_close_timeout=timedelta(seconds=timeout),
+            retry_policy=retry,
+            heartbeat_timeout=heartbeat_timeout,
         )
 
         # Convert MCPToolExecutionResult to ToolExecutionResult

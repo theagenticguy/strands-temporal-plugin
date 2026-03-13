@@ -265,6 +265,7 @@ class TemporalModelStub:
                 execute_model_activity,
                 activity_input,
                 start_to_close_timeout=timedelta(seconds=self._activity_timeout),
+                heartbeat_timeout=timedelta(seconds=30),
                 retry_policy=self._retry_policy,
             )
 
@@ -283,6 +284,7 @@ class TemporalModelStub:
                 execute_model_activity,
                 activity_input,
                 start_to_close_timeout=timedelta(seconds=self._activity_timeout),
+                heartbeat_timeout=timedelta(seconds=30),
                 retry_policy=self._retry_policy,
             )
 

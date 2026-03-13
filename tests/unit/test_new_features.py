@@ -255,8 +255,8 @@ class TestTemporalToolExecutorWithToolConfigs:
         # Verify the activity was called with default timeout
         call_kwargs = mock_workflow.execute_activity.call_args[1]
         assert call_kwargs["start_to_close_timeout"] == timedelta(seconds=90.0)
-        # No heartbeat_timeout when not configured
-        assert "heartbeat_timeout" not in call_kwargs
+        # Default heartbeat_timeout of 25s when not configured per-tool
+        assert call_kwargs["heartbeat_timeout"] == timedelta(seconds=25)
 
     @pytest.mark.asyncio
     @patch("strands_temporal_plugin.tool_executor.workflow")
