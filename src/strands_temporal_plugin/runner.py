@@ -92,8 +92,16 @@ Architecture:
 
 from __future__ import annotations
 
-from .activities import execute_model_activity
-from .types import BedrockProviderConfig, ModelExecutionInput, ModelExecutionResult, ProviderConfig
+from .activities import execute_model_activity, execute_structured_output_activity
+from .types import (
+    BedrockProviderConfig,
+    ModelExecutionInput,
+    ModelExecutionResult,
+    ProviderConfig,
+    StructuredOutputInput,
+    StructuredOutputResult,
+    TemporalToolConfig,
+)
 from collections.abc import AsyncIterator
 from datetime import timedelta
 from strands.types.content import Messages
@@ -288,17 +296,45 @@ class TemporalModelStub:
         system_prompt: str | None = None,
         **kwargs: Any,
     ) -> Any:
-        """Structured output is not yet supported in Temporal context.
+        """Route structured output to Temporal activity.
 
-        This would require additional activity support for schema validation.
+        The output_model (a Pydantic class) is serialized as its import path,
+        then reconstructed on the worker side where the actual model inference
+        and validation happen.
+
+        Args:
+            output_model: Pydantic model class for output validation
+            prompt: The prompt to send to the model
+            system_prompt: Optional system prompt
+            **kwargs: Additional arguments
+
+        Returns:
+            Instance of output_model with validated fields
 
         Raises:
-            NotImplementedError: Always raises as this is not yet supported
+            ApplicationError: If the model class cannot be resolved or validation fails
         """
-        raise NotImplementedError(
-            "Structured output is not yet implemented in Temporal context. "
-            "Use regular model calls and parse the response manually."
+        # Resolve the class to an import path
+        model_module = output_model.__module__
+        model_name = output_model.__qualname__
+        output_model_path = f"{model_module}.{model_name}"
+
+        activity_input = StructuredOutputInput(
+            provider_config=self._provider_config,
+            output_model_path=output_model_path,
+            prompt=prompt,
+            system_prompt=system_prompt,
         )
+
+        result: StructuredOutputResult = await workflow.execute_activity(
+            execute_structured_output_activity,
+            activity_input,
+            start_to_close_timeout=timedelta(seconds=self._activity_timeout),
+            retry_policy=self._retry_policy,
+        )
+
+        # Reconstruct the Pydantic model from the serialized dict
+        return output_model.model_validate(result.output)
 
 
 # =============================================================================
@@ -314,6 +350,8 @@ def create_durable_agent(
     mcp_servers: list[Any] | None = None,
     model_timeout: float = 300.0,
     tool_timeout: float = 60.0,
+    conversation_manager: Any | None = None,
+    tool_configs: dict[str, TemporalToolConfig] | None = None,
     **agent_kwargs: Any,
 ) -> Any:
     """Create a Strands Agent with full Temporal durability.
@@ -336,7 +374,12 @@ def create_durable_agent(
         system_prompt: System prompt for the agent
         mcp_servers: Optional list of MCP server configurations for tool discovery
         model_timeout: Timeout for model activities in seconds (default 5 minutes)
-        tool_timeout: Timeout for tool activities in seconds (default 1 minute)
+        tool_timeout: Default timeout for tool activities in seconds (default 1 minute)
+        conversation_manager: Strands ConversationManager instance for context window management.
+                            Pass SlidingWindowConversationManager, SummarizingConversationManager, etc.
+                            If None, Strands uses its default (SlidingWindowConversationManager).
+        tool_configs: Per-tool configuration overrides for timeout, heartbeat, and retry.
+                     Example: {"slow_tool": TemporalToolConfig(start_to_close_timeout=300.0)}
         **agent_kwargs: Additional arguments passed to Strands Agent constructor
 
     Returns:
@@ -438,13 +481,23 @@ def create_durable_agent(
         tool_modules=merged_modules,
         mcp_servers=mcp_servers,
         activity_timeout=tool_timeout,
+        tool_configs=tool_configs,
     )
 
+    # Build Agent kwargs
+    agent_init_kwargs: dict[str, Any] = {
+        "model": model_stub,
+        "tool_executor": tool_executor,
+        "tools": tools or [],
+        "system_prompt": system_prompt,
+    }
+
+    # Pass conversation_manager if provided (otherwise Strands uses default)
+    if conversation_manager is not None:
+        agent_init_kwargs["conversation_manager"] = conversation_manager
+
+    # Merge any extra kwargs
+    agent_init_kwargs.update(agent_kwargs)
+
     # Create agent with durable model and tool execution
-    return Agent(
-        model=model_stub,
-        tool_executor=tool_executor,
-        tools=tools or [],
-        system_prompt=system_prompt,
-        **agent_kwargs,
-    )
+    return Agent(**agent_init_kwargs)

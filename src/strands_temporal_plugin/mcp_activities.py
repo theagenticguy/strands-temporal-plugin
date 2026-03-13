@@ -11,8 +11,10 @@ Each activity creates a fresh connection to ensure durability.
 
 from __future__ import annotations
 
+import atexit
 import fnmatch
 import logging
+import threading
 from .types import (
     BaseMCPServerConfig,
     MCPListToolsInput,
@@ -29,6 +31,71 @@ from typing import Any
 
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Worker-level MCP Client Cache
+# =============================================================================
+# MCP clients are cached per server_id to avoid restarting server processes
+# for every tool call. The cache is thread-safe and cleaned up at exit.
+
+_mcp_client_lock = threading.Lock()
+_mcp_clients: dict[str, Any] = {}
+
+
+def _get_cached_mcp_client(server_config: BaseMCPServerConfig) -> Any:
+    """Get or create a cached MCP client for the given server config.
+
+    Clients are cached by server_id and reused across activity executions
+    on the same worker. This avoids the overhead of starting a new MCP
+    server process for each tool call.
+
+    Args:
+        server_config: MCP server configuration
+
+    Returns:
+        MCPClient instance (already entered context manager)
+    """
+    cache_key = server_config.server_id
+
+    with _mcp_client_lock:
+        if cache_key in _mcp_clients:
+            client = _mcp_clients[cache_key]
+            # Verify the client is still usable
+            try:
+                # If client has a way to check liveness, use it
+                if hasattr(client, "_transport") and client._transport is not None:
+                    return client
+            except Exception:
+                pass
+            # Client is stale — remove and recreate
+            try:
+                client.__exit__(None, None, None)
+            except Exception:
+                pass
+            del _mcp_clients[cache_key]
+
+        # Create new client
+        client = _create_mcp_client(server_config)
+        client.__enter__()
+        _mcp_clients[cache_key] = client
+        return client
+
+
+def close_mcp_clients() -> None:
+    """Close all cached MCP clients. Call during worker shutdown."""
+    with _mcp_client_lock:
+        for server_id, client in list(_mcp_clients.items()):
+            try:
+                client.__exit__(None, None, None)
+                logger.info(f"Closed cached MCP client: {server_id}")
+            except Exception as e:
+                logger.warning(f"Error closing MCP client {server_id}: {e}")
+        _mcp_clients.clear()
+
+
+# Register cleanup for worker shutdown
+atexit.register(close_mcp_clients)
 
 
 def _safe_heartbeat(detail: str) -> None:
@@ -332,29 +399,27 @@ async def execute_mcp_tool_activity(input_data: MCPToolExecutionInput) -> MCPToo
     logger.info(f"Executing MCP tool: server={server_config.server_id}, tool={tool_name} (actual={actual_tool_name})")
 
     try:
-        # Create MCP client
+        # Get or create cached MCP client (avoids restarting server process per call)
         _safe_heartbeat("connecting")
-        mcp_client = _create_mcp_client(server_config)
+        mcp_client = _get_cached_mcp_client(server_config)
 
-        # Connect and call tool
-        with mcp_client:
-            # Call the tool (using actual name without prefix)
-            # Signature: call_tool_sync(tool_use_id, name, arguments)
-            _safe_heartbeat("executing")
-            result = mcp_client.call_tool_sync(input_data.tool_use_id, actual_tool_name, input_data.tool_input)
+        # Call the tool (using actual name without prefix)
+        # Signature: call_tool_sync(tool_use_id, name, arguments)
+        _safe_heartbeat("executing")
+        result = mcp_client.call_tool_sync(input_data.tool_use_id, actual_tool_name, input_data.tool_input)
 
-            # Convert result to serializable format
-            content = _convert_mcp_result_to_content(result)
+        # Convert result to serializable format
+        content = _convert_mcp_result_to_content(result)
 
-            logger.info(f"MCP tool executed: server={server_config.server_id}, tool={tool_name}")
+        logger.info(f"MCP tool executed: server={server_config.server_id}, tool={tool_name}")
 
-            return MCPToolExecutionResult(
-                tool_use_id=input_data.tool_use_id,
-                status="success",
-                content=content,
-                structured_content=getattr(result, "structuredContent", None),
-                metadata=getattr(result, "metadata", None),
-            )
+        return MCPToolExecutionResult(
+            tool_use_id=input_data.tool_use_id,
+            status="success",
+            content=content,
+            structured_content=getattr(result, "structuredContent", None),
+            metadata=getattr(result, "metadata", None),
+        )
 
     except ApplicationError:
         raise

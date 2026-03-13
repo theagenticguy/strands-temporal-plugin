@@ -24,8 +24,9 @@ Usage:
 
 from __future__ import annotations
 
-from .activities import execute_model_activity, execute_tool_activity
+from .activities import execute_model_activity, execute_structured_output_activity, execute_tool_activity
 from .mcp_activities import execute_mcp_tool_activity, list_mcp_tools_activity
+from .session import load_session_activity, save_session_activity
 from collections.abc import Callable, Sequence
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.plugin import SimplePlugin
@@ -54,6 +55,8 @@ _SAFE_PASSTHROUGH_MODULES = (
     "strands.tools.executor",
     # Strands agent core (for Agent class - models do I/O but are replaced)
     "strands.agent",
+    # Strands conversation manager (for ConversationManager in workflow context)
+    "strands.agent.conversation_manager",
     # Note: strands.models is NOT passed through - use TemporalModelStub instead
 )
 
@@ -106,8 +109,11 @@ def _merge_activities(
     plugin_activities = [
         execute_model_activity,
         execute_tool_activity,
+        execute_structured_output_activity,
         list_mcp_tools_activity,
         execute_mcp_tool_activity,
+        load_session_activity,
+        save_session_activity,
     ]
 
     for activity in plugin_activities:

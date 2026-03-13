@@ -99,11 +99,7 @@ class OllamaProviderConfig(BaseProviderConfig):
     top_p: float | None = None
 
 
-# Union type for provider configuration with discriminator
-ProviderConfig = Annotated[
-    BedrockProviderConfig | AnthropicProviderConfig | OpenAIProviderConfig | OllamaProviderConfig,
-    Field(discriminator="provider"),
-]
+# ProviderConfig union is defined after CustomProviderConfig below
 
 
 # =============================================================================
@@ -428,6 +424,179 @@ class ToolExecutorConfig(BaseModel):
             maximum_interval=timedelta(seconds=self.max_retry_interval_seconds),
             backoff_coefficient=self.backoff_coefficient,
         )
+
+
+# =============================================================================
+# Per-Tool Activity Configuration
+# =============================================================================
+
+
+class TemporalToolConfig(BaseModel):
+    """Per-tool configuration for Temporal activity execution.
+
+    Allows overriding timeout, heartbeat, and retry settings on a per-tool basis.
+    When a field is None, the executor's default is used.
+
+    Example:
+        tool_configs = {
+            "slow_search": TemporalToolConfig(
+                start_to_close_timeout=300.0,
+                heartbeat_timeout=30.0,
+            ),
+            "flaky_api": TemporalToolConfig(
+                retry_max_attempts=5,
+                retry_initial_interval=2.0,
+            ),
+        }
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    start_to_close_timeout: float | None = None
+    heartbeat_timeout: float | None = None
+    retry_max_attempts: int | None = None
+    retry_initial_interval: float | None = None  # seconds
+    retry_max_interval: float | None = None  # seconds
+    retry_backoff_coefficient: float | None = None
+
+    def get_retry_policy(self, fallback: RetryPolicy) -> RetryPolicy:
+        """Build a RetryPolicy, falling back to the provided default for unset fields."""
+        return RetryPolicy(
+            maximum_attempts=self.retry_max_attempts if self.retry_max_attempts is not None else fallback.maximum_attempts,
+            initial_interval=(
+                timedelta(seconds=self.retry_initial_interval)
+                if self.retry_initial_interval is not None
+                else fallback.initial_interval
+            ),
+            maximum_interval=(
+                timedelta(seconds=self.retry_max_interval)
+                if self.retry_max_interval is not None
+                else fallback.maximum_interval
+            ),
+            backoff_coefficient=(
+                self.retry_backoff_coefficient if self.retry_backoff_coefficient is not None else fallback.backoff_coefficient
+            ),
+        )
+
+
+# =============================================================================
+# Session Management Types (S3-backed, activity-driven)
+# =============================================================================
+
+
+class SessionConfig(BaseModel):
+    """Configuration for S3-backed session persistence.
+
+    Used with TemporalSessionManager to load/save agent state through activities.
+    The offset/stream model: S3 is the state store, Temporal is the orchestrator,
+    session_id is the pointer.
+
+    Example:
+        config = SessionConfig(
+            session_id="user-456",
+            bucket="my-agent-sessions",
+            prefix="production/",
+            region_name="us-west-2",
+        )
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    bucket: str
+    prefix: str = ""
+    region_name: str | None = None
+
+
+class SessionData(BaseModel):
+    """Session data loaded from / saved to S3.
+
+    Contains everything needed to restore an agent's conversational state.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    agent_state: dict[str, Any] = Field(default_factory=dict)
+    conversation_manager_state: dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionLoadInput(BaseModel):
+    """Input for the session load activity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    config: SessionConfig
+
+
+class SessionSaveInput(BaseModel):
+    """Input for the session save activity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    config: SessionConfig
+    data: SessionData
+
+
+# =============================================================================
+# Structured Output Types
+# =============================================================================
+
+
+class StructuredOutputInput(BaseModel):
+    """Input for structured output model activity.
+
+    The output_model_path is a dotted import path (e.g. 'myapp.models.WeatherOutput')
+    that resolves to a Pydantic model class on the worker side.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider_config: ProviderConfig
+    output_model_path: str
+    prompt: str
+    system_prompt: str | None = None
+
+
+class StructuredOutputResult(BaseModel):
+    """Result from structured output activity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    output: dict[str, Any]
+    output_model_path: str
+
+
+# =============================================================================
+# Custom Provider Configuration
+# =============================================================================
+
+
+class CustomProviderConfig(BaseProviderConfig):
+    """Configuration for custom model providers via import path.
+
+    Allows plugging in any Strands-compatible Model implementation without
+    modifying the plugin source. The provider_class_path should resolve to
+    a class that accepts **provider_kwargs in its constructor.
+
+    Example:
+        config = CustomProviderConfig(
+            model_id="my-custom-model",
+            provider_class_path="myapp.models.MyCustomModel",
+            provider_kwargs={"api_key": "sk-...", "base_url": "https://..."},
+        )
+    """
+
+    provider: Literal["custom"] = "custom"
+    provider_class_path: str
+    provider_kwargs: dict[str, Any] = Field(default_factory=dict)
+
+
+# Update the ProviderConfig union to include CustomProviderConfig
+ProviderConfig = Annotated[  # noqa: F811
+    BedrockProviderConfig | AnthropicProviderConfig | OpenAIProviderConfig | OllamaProviderConfig | CustomProviderConfig,
+    Field(discriminator="provider"),
+]
 
 
 # =============================================================================

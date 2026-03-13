@@ -16,7 +16,14 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
-from .types import ModelExecutionInput, ModelExecutionResult, ToolExecutionInput, ToolExecutionResult
+from .types import (
+    ModelExecutionInput,
+    ModelExecutionResult,
+    StructuredOutputInput,
+    StructuredOutputResult,
+    ToolExecutionInput,
+    ToolExecutionResult,
+)
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 from typing import Any
@@ -139,6 +146,24 @@ def _create_model_from_config(provider_config: Any) -> Any:
             kwargs["top_p"] = provider_config.top_p
 
         return OllamaModel(**kwargs)
+
+    elif provider == "custom":
+        # Pluggable provider via import path
+        try:
+            provider_class_path = provider_config.provider_class_path
+            module_path, class_name = provider_class_path.rsplit(".", 1)
+            module = importlib.import_module(module_path)
+            provider_class = getattr(module, class_name)
+        except (ImportError, AttributeError, ValueError) as e:
+            raise ApplicationError(
+                f"Failed to load custom provider '{provider_config.provider_class_path}': {e}",
+                type="CustomProviderNotFound",
+                non_retryable=True,
+            ) from e
+
+        kwargs = {"model_id": provider_config.model_id}
+        kwargs.update(provider_config.provider_kwargs)
+        return provider_class(**kwargs)
 
     else:
         raise ApplicationError(
@@ -391,3 +416,84 @@ async def execute_tool_activity(input_data: ToolExecutionInput) -> ToolExecution
             status=status,
             content=[{"text": f"Tool execution failed: {e}"}],
         )
+
+
+# =============================================================================
+# Structured Output Activity
+# =============================================================================
+
+
+@activity.defn
+async def execute_structured_output_activity(input_data: StructuredOutputInput) -> StructuredOutputResult:
+    """Execute a structured output model call.
+
+    This activity:
+    1. Creates the appropriate model from configuration
+    2. Dynamically loads the output Pydantic model class
+    3. Calls model.structured_output() with the prompt and schema
+    4. Returns the validated output as a serialized dict
+
+    Args:
+        input_data: Structured output input with provider config, model path, and prompt
+
+    Returns:
+        StructuredOutputResult with validated output dict
+
+    Raises:
+        ApplicationError: For non-retryable errors (model class not found, validation failed)
+    """
+    logger.info(
+        f"Executing structured output: provider={input_data.provider_config.provider}, "
+        f"output_model={input_data.output_model_path}"
+    )
+
+    try:
+        # Create model from configuration
+        model = _create_model_from_config(input_data.provider_config)
+
+        # Dynamically load the output model class
+        _safe_heartbeat("loading output model")
+        module_path, class_name = input_data.output_model_path.rsplit(".", 1)
+        module = importlib.import_module(module_path)
+        output_model_class = getattr(module, class_name)
+
+        # Call structured_output
+        _safe_heartbeat("executing structured output")
+        result = model.structured_output(
+            output_model=output_model_class,
+            prompt=input_data.prompt,
+            system_prompt=input_data.system_prompt,
+        )
+
+        # Serialize the result
+        if hasattr(result, "model_dump"):
+            output_dict = result.model_dump()
+        elif hasattr(result, "dict"):
+            output_dict = result.dict()
+        else:
+            output_dict = dict(result)
+
+        logger.info(f"Structured output completed: {input_data.output_model_path}")
+
+        return StructuredOutputResult(
+            output=output_dict,
+            output_model_path=input_data.output_model_path,
+        )
+
+    except ApplicationError:
+        raise
+
+    except (ImportError, AttributeError) as e:
+        raise ApplicationError(
+            f"Failed to load output model '{input_data.output_model_path}': {e}",
+            type="OutputModelNotFound",
+            non_retryable=True,
+        ) from e
+
+    except Exception as e:
+        logger.exception(f"Structured output failed: {e}")
+        raise ApplicationError(
+            f"Structured output failed: {e}",
+            type="StructuredOutputError",
+            non_retryable=False,
+        ) from e

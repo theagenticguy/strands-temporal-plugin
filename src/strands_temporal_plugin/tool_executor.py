@@ -81,6 +81,7 @@ from .types import (
     MCPToolExecutionInput,
     MCPToolExecutionResult,
     MCPToolSpec,
+    TemporalToolConfig,
     ToolExecutionInput,
     ToolExecutionResult,
 )
@@ -160,13 +161,27 @@ class TemporalToolExecutor:
         tool_modules: Mapping of tool names to module paths for dynamic import
                      Example: {"get_weather": "myapp.tools"}
         mcp_servers: Optional list of MCP server configurations for tool discovery
-        activity_timeout: Timeout for tool activity execution (default 60 seconds)
-        retry_policy: Custom retry policy for tool activities (optional)
+        activity_timeout: Default timeout for tool activity execution (default 60 seconds)
+        retry_policy: Default retry policy for tool activities (optional)
+        tool_configs: Per-tool configuration overrides for timeout, heartbeat, and retry.
+                     Lookup chain: tool_configs[tool_name] → default → hardcoded.
+                     Example: {"slow_search": TemporalToolConfig(start_to_close_timeout=300.0)}
 
     Example:
         # With static tools only
         executor = TemporalToolExecutor(
             tool_modules={"get_weather": "myapp.tools"},
+        )
+
+        # With per-tool config
+        executor = TemporalToolExecutor(
+            tool_modules={"get_weather": "myapp.tools", "slow_search": "myapp.tools"},
+            tool_configs={
+                "slow_search": TemporalToolConfig(
+                    start_to_close_timeout=300.0,
+                    heartbeat_timeout=30.0,
+                ),
+            },
         )
 
         # With MCP servers
@@ -198,14 +213,16 @@ class TemporalToolExecutor:
         mcp_servers: list[MCPServerConfig] | None = None,
         activity_timeout: float = 60.0,
         retry_policy: RetryPolicy | None = None,
+        tool_configs: dict[str, TemporalToolConfig] | None = None,
     ) -> None:
         """Initialize the TemporalToolExecutor.
 
         Args:
             tool_modules: Mapping of tool names to module paths
             mcp_servers: List of MCP server configurations
-            activity_timeout: Timeout in seconds for tool activities
-            retry_policy: Optional custom retry policy
+            activity_timeout: Default timeout in seconds for tool activities
+            retry_policy: Default retry policy
+            tool_configs: Per-tool configuration overrides
         """
         self._tool_modules = tool_modules or {}
         self._mcp_servers = mcp_servers or []
@@ -216,6 +233,7 @@ class TemporalToolExecutor:
             maximum_interval=timedelta(seconds=30),
             backoff_coefficient=2.0,
         )
+        self._tool_configs = tool_configs or {}
 
         # MCP state (populated by discover_mcp_tools)
         self._mcp_tools: list[MCPToolSpec] = []
@@ -451,11 +469,23 @@ class TemporalToolExecutor:
             tool_use_id=tool_use_id,
         )
 
+        # Per-tool config lookup: tool_configs[name] → default
+        tool_config = self._tool_configs.get(tool_name)
+        timeout = tool_config.start_to_close_timeout if tool_config and tool_config.start_to_close_timeout else self._activity_timeout
+        retry = tool_config.get_retry_policy(self._retry_policy) if tool_config else self._retry_policy
+        heartbeat_timeout = timedelta(seconds=tool_config.heartbeat_timeout) if tool_config and tool_config.heartbeat_timeout else None
+
+        activity_kwargs: dict[str, Any] = {
+            "start_to_close_timeout": timedelta(seconds=timeout),
+            "retry_policy": retry,
+        }
+        if heartbeat_timeout:
+            activity_kwargs["heartbeat_timeout"] = heartbeat_timeout
+
         result: ToolExecutionResult = await workflow.execute_activity(
             execute_tool_activity,
             activity_input,
-            start_to_close_timeout=timedelta(seconds=self._activity_timeout),
-            retry_policy=self._retry_policy,
+            **activity_kwargs,
         )
 
         return result
@@ -494,11 +524,23 @@ class TemporalToolExecutor:
             tool_use_id=tool_use_id,
         )
 
+        # Per-tool config lookup: tool_configs[name] → default
+        tool_config = self._tool_configs.get(tool_name)
+        timeout = tool_config.start_to_close_timeout if tool_config and tool_config.start_to_close_timeout else self._activity_timeout
+        retry = tool_config.get_retry_policy(self._retry_policy) if tool_config else self._retry_policy
+        heartbeat_timeout = timedelta(seconds=tool_config.heartbeat_timeout) if tool_config and tool_config.heartbeat_timeout else None
+
+        activity_kwargs: dict[str, Any] = {
+            "start_to_close_timeout": timedelta(seconds=timeout),
+            "retry_policy": retry,
+        }
+        if heartbeat_timeout:
+            activity_kwargs["heartbeat_timeout"] = heartbeat_timeout
+
         result: MCPToolExecutionResult = await workflow.execute_activity(
             execute_mcp_tool_activity,
             activity_input,
-            start_to_close_timeout=timedelta(seconds=self._activity_timeout),
-            retry_policy=self._retry_policy,
+            **activity_kwargs,
         )
 
         # Convert MCPToolExecutionResult to ToolExecutionResult

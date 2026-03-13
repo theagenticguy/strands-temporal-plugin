@@ -2,8 +2,8 @@
 
 import pytest
 from strands import tool
-from strands_temporal_plugin.runner import _extract_tool_modules, create_durable_agent
 from strands_temporal_plugin import BedrockProviderConfig
+from strands_temporal_plugin.runner import _extract_tool_modules, create_durable_agent
 
 
 @tool
