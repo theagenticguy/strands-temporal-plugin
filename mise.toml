@@ -1,0 +1,91 @@
+[tools]
+gh = "latest"
+gitleaks = "latest"
+osv-scanner = "latest"
+python = "3.12"
+semgrep = "latest"
+syft = "latest"
+trivy = "latest"
+uv = "latest"
+
+[env]
+_.python.venv = { path = ".venv", create = true }
+
+[tasks]
+install = "uv sync --all-groups"
+
+[tasks.lint]
+description = "Lint with ruff"
+run = "uvx ruff check src/"
+
+[tasks."lint:fix"]
+description = "Lint and auto-fix"
+run = "uvx ruff check src/ --fix"
+
+[tasks.format]
+description = "Format with ruff"
+run = "uvx ruff format src/"
+
+[tasks."format:check"]
+description = "Check formatting"
+run = "uvx ruff format --check src/"
+
+[tasks.typecheck]
+description = "Type check with ty"
+run = "uvx ty check src/"
+
+[tasks.test]
+description = "Run unit tests"
+run = "uv run pytest tests/unit/ -x"
+
+[tasks."test:verbose"]
+description = "Run tests with verbose output"
+run = "uv run pytest tests/unit/ -v"
+
+[tasks."test:coverage"]
+description = "Run tests with coverage"
+run = "uv run pytest tests/unit/ --cov=src/strands_temporal_plugin --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml --cov-branch"
+
+[tasks.security]
+description = "Run all security scans"
+depends = ["security:secrets", "security:sast", "security:bandit", "security:deps", "security:licenses"]
+
+[tasks."security:secrets"]
+description = "Scan for secrets with gitleaks"
+run = "gitleaks detect --source . --no-banner"
+
+[tasks."security:sast"]
+description = "SAST scan with semgrep (auto + OWASP top 10)"
+run = "semgrep scan --config auto --config p/owasp-top-ten --error --quiet src/"
+
+[tasks."security:bandit"]
+description = "SAST scan with bandit (fail on HIGH severity)"
+file = "scripts/security-bandit.sh"
+
+[tasks."security:deps"]
+description = "Audit dependencies for known vulnerabilities (osv-scanner)"
+run = "osv-scanner scan --lockfile uv.lock"
+
+[tasks."security:licenses"]
+description = "Check 3P dependency licenses against allowlist"
+run = "uv run --with pip-licenses pip-licenses"
+
+[tasks."security:sbom"]
+description = "Generate CycloneDX SBOM via syft"
+run = "syft . -o cyclonedx-json=sbom.cdx.json"
+
+[tasks.check]
+description = "Run all checks (lint + format + typecheck + test)"
+depends = ["lint", "format:check", "typecheck", "test"]
+
+[tasks.bump]
+description = "Bump version using commitizen"
+run = "uv run cz bump"
+
+[tasks.release]
+description = "Bump version, generate changelog, tag, and push"
+file = "scripts/release.sh"
+
+[tasks.commit]
+description = "Interactive conventional commit"
+run = "uv run cz commit"

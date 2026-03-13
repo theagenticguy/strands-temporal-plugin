@@ -15,6 +15,11 @@ import atexit
 import fnmatch
 import logging
 import threading
+from typing import Any
+
+from temporalio import activity
+from temporalio.exceptions import ApplicationError
+
 from .types import (
     BaseMCPServerConfig,
     MCPListToolsInput,
@@ -25,9 +30,6 @@ from .types import (
     StdioMCPServerConfig,
     StreamableHTTPMCPServerConfig,
 )
-from temporalio import activity
-from temporalio.exceptions import ApplicationError
-from typing import Any
 
 
 logger = logging.getLogger(__name__)

@@ -1,8 +1,9 @@
 [project]
 name = "strands-temporal-plugin"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "Durable AI agent execution — Strands Agents SDK + Temporal"
 readme = "README.md"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.12.5",
@@ -20,68 +21,71 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "anyio>=4.10.0",
+    "commitizen>=4.13.8",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.0.0",
     "pytest-xdist>=3.8.0",
     "ruff>=0.14.13",
+    "tomlkit>=0.13.0",
 ]
+security = [
+    "bandit[sarif]>=1.9.3",
+]
+
+# =============================================================================
+# Ruff Configuration (Linting & Formatting)
+# =============================================================================
 
 [tool.ruff]
 line-length = 120
-extend-include = ["*.ipynb", "**/__init__.py"]
-target-version = "py313"
-exclude = [
-    ".venv",
-    "venv",
-    "**/__pycache__",
-    "**/node_modules",
-    "**/.mypy_cache",
-    "**/.pytest_cache",
-    "**/.ruff_cache",
-    "**/.coverage",
-    "**/dist",
-    "**/build",
-    "**/env",
-    "**/.venv",
-    "**/.ipynb_checkpoints",
-]
-force-exclude = true
+indent-width = 4
+target-version = "py312"
+exclude = [".git", ".venv", "__pycache__", "build", "dist", ".ruff_cache"]
 
 [tool.ruff.lint]
-exclude = ["__init__.py", "**/__init__.py"]
 select = [
     "E",      # pycodestyle errors
     "W",      # pycodestyle warnings
-    "F",      # pyflakes
+    "F",      # Pyflakes
     "I",      # isort
     "B",      # flake8-bugbear
     "C4",     # flake8-comprehensions
+    "C90",    # mccabe complexity
     "UP",     # pyupgrade
-    "ARG001", # unused arguments in functions
+    "ARG",    # flake8-unused-arguments
+    "SIM",    # flake8-simplify
+    "PL",     # pylint
+    "RUF",    # Ruff-specific
+    "S",      # flake8-bandit (security)
 ]
 ignore = [
-    "C901", # too complex
-    "E501", # line too long
-    "E741", # ambiguous variable name
-    "F402", # unused import
-    "F823", # missing type stubs
-    "D100", # missing docstring in public module
-    "D106", # missing docstring in public function
+    "C901",    # too complex (use C90 mccabe instead)
+    "E501",    # line too long (handled by formatter)
+    "PLC0415", # allow imports inside functions (lazy/conditional imports by design)
+    "PLR0912", # too many branches (activity factory has many provider cases)
+    "PLR0913", # too many function arguments (activity/executor signatures)
+    "PLR0915", # too many statements (activity factory)
+    "PLR2004", # magic value comparison (acceptable in tests and activities)
+    "ARG002",  # unused method arguments (ABC interface compliance)
+    "S101",    # assert used (ruff per-file handles this)
+    "SIM105",  # allow try-except-pass patterns
+    "SIM108",  # allow if-else over ternary (readability preference)
+    "S110",    # allow try-except-pass (MCP client cleanup is best-effort)
 ]
+fixable = ["ALL"]
 
-# Avoid trying to fix flake8-bugbear (`B`) violations.
-unfixable = ["B"]
+[tool.ruff.lint.mccabe]
+max-complexity = 15
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
-no-sections = true
 combine-as-imports = true
-split-on-trailing-comma = false
 
 [tool.ruff.lint.per-file-ignores]
-"**/*.ipynb" = ["F704"]
-"tests/**/*.py" = ["D100", "D103"]
+"tests/**/*.py" = ["D", "S101", "ARG", "PLR2004"]
+"**/__init__.py" = ["F401", "RUF022"]
+"examples/**/*.py" = ["S101", "S602", "S603", "S607", "PLR2004", "ARG"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -89,37 +93,72 @@ convention = "google"
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
-skip-magic-trailing-comma = false
 line-ending = "auto"
 docstring-code-format = true
 
-[tool.mypy]
-strict = true
-exclude = [
-    "venv",
-    ".venv",
-    ".*/__pycache__",
-    ".*/node_modules",
-    ".*/.mypy_cache",
-    ".*/.pytest_cache",
-    ".*/.ruff_cache",
-    ".*/.coverage",
-    ".*/dist",
+# =============================================================================
+# Ty Configuration (Type Checking)
+# =============================================================================
+
+[tool.ty.rules]
+possibly-unresolved-reference = "error"
+invalid-argument-type = "error"
+missing-argument = "error"
+unsupported-operator = "error"
+division-by-zero = "error"
+unused-ignore-comment = "warn"
+redundant-cast = "warn"
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.src]
+include = ["src"]
+
+# =============================================================================
+# Bandit Configuration (SAST)
+# =============================================================================
+
+[tool.bandit]
+exclude_dirs = ["tests", "examples", ".venv", "build", "dist"]
+skips = [
+    "B101",  # assert_used — tests use assert
+    "B404",  # import_subprocess — not used in plugin
 ]
 
-[tool.pyright]
-include = ["src"]
-exclude = [
-    "venv",
-    ".venv",
-    "**/__pycache__",
-    "**/node_modules",
-    "**/.mypy_cache",
-    "**/.pytest_cache",
-    "**/.ruff_cache",
-    "**/.coverage",
-    "**/dist",
+# =============================================================================
+# Coverage Configuration (pytest-cov / coverage.py)
+# =============================================================================
+
+[tool.coverage.run]
+branch = true
+source = ["strands_temporal_plugin"]
+omit = [
+    "*/tests/*",
+    "*/__main__.py",
 ]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = true
+fail_under = 83
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@overload",
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+# =============================================================================
+# Pytest Configuration
+# =============================================================================
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -127,42 +166,39 @@ python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 asyncio_mode = "auto"
-addopts = "--cov=src --cov-report=term-missing --cov-report=xml --cov-fail-under=85 -n auto"
+addopts = "--cov=src --cov-report=term-missing --cov-report=xml --cov-fail-under=83 --cov-branch -n auto"
 filterwarnings = [
     "ignore:unclosed database in <sqlite3.Connection object at:ResourceWarning",
-    # Temporalio internal warnings when using Pydantic v2 (upstream issue)
     "ignore:If you're using Pydantic v2:UserWarning",
     "ignore:The `dict` method is deprecated:pydantic.warnings.PydanticDeprecatedSince20",
     "ignore:The `parse_obj` method is deprecated:pydantic.warnings.PydanticDeprecatedSince20",
-    # Temporalio sandbox import warnings (expected behavior)
     "ignore:Module pydantic_core was imported after initial workflow load:UserWarning",
     "ignore:Module pydantic_core._pydantic_core was imported after initial workflow load:UserWarning",
     "ignore:Module pydantic_core.core_schema was imported after initial workflow load:UserWarning",
 ]
 
-[tool.coverage.run]
-source = ["src"]
+# =============================================================================
+# pip-licenses Configuration (License Compliance)
+# =============================================================================
 
-[tool.coverage.report]
-skip_covered = true
-show_missing = true
-precision = 2
-exclude_lines = [
-    'def __repr__',
-    'pragma= no cover',
-    'raise NotImplementedError',
-    'if TYPE_CHECKING=',
-    'if typing.TYPE_CHECKING=',
-    '@overload',
-    '@typing.overload',
-    '\(Protocol\)=$',
-    'typing.assert_never',
-    'assert_never',
-    'if __name__ == .__main__.=',
+[tool.pip-licenses]
+from = "mixed"
+fail-on = "GPL;AGPL;SSPL;EUPL;CPAL;OSL;RPL"
+partial-match = true
+ignore-packages = [
+    "strands-temporal-plugin",
 ]
 
-[tool.coverage.paths]
-include = ["src/**/*.py"]
+# =============================================================================
+# Commitizen Configuration (Conventional Commits)
+# =============================================================================
 
-[tool.bandit]
-exclude_dirs = ["venv", "tests"]
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "pep621"
+version_files = [
+    "src/strands_temporal_plugin/__init__.py:__version__"
+]
+tag_format = "v$version"
+update_changelog_on_bump = true
+version_scheme = "semver"

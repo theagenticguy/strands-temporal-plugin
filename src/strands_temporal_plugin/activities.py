@@ -16,6 +16,11 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
+from typing import Any
+
+from temporalio import activity
+from temporalio.exceptions import ApplicationError
+
 from .types import (
     ModelExecutionInput,
     ModelExecutionResult,
@@ -24,9 +29,6 @@ from .types import (
     ToolExecutionInput,
     ToolExecutionResult,
 )
-from temporalio import activity
-from temporalio.exceptions import ApplicationError
-from typing import Any
 
 
 logger = logging.getLogger(__name__)

@@ -49,12 +49,14 @@ from __future__ import annotations
 
 import json
 import logging
-from .types import SessionConfig, SessionData, SessionLoadInput, SessionSaveInput
 from datetime import timedelta
+from typing import Any
+
 from temporalio import activity, workflow
 from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError
-from typing import Any
+
+from .types import SessionConfig, SessionData, SessionLoadInput, SessionSaveInput
 
 
 logger = logging.getLogger(__name__)
@@ -158,10 +160,7 @@ class TemporalSessionManager:
         )
 
         self._loaded = True
-        logger.info(
-            f"Session loaded: {self._config.session_id}, "
-            f"{len(self._data.messages)} messages"
-        )
+        logger.info(f"Session loaded: {self._config.session_id}, {len(self._data.messages)} messages")
         return self._data
 
     async def save(self, agent: Any) -> None:
@@ -204,10 +203,7 @@ class TemporalSessionManager:
             retry_policy=self._retry_policy,
         )
 
-        logger.info(
-            f"Session saved: {self._config.session_id}, "
-            f"{len(messages)} messages"
-        )
+        logger.info(f"Session saved: {self._config.session_id}, {len(messages)} messages")
 
 
 # =============================================================================

@@ -67,6 +67,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
+from datetime import timedelta
+from typing import TYPE_CHECKING, Any
+
+# Import TypedEvent for proper event yielding
+# This import is safe in workflow context due to sandbox passthrough
+from strands.tools.executors._executor import ToolExecutor as StrandsToolExecutor
+from strands.types._events import ToolCancelEvent, ToolInterruptEvent, ToolResultEvent, TypedEvent
+from temporalio import workflow
+from temporalio.common import RetryPolicy
+
 from .activities import execute_tool_activity
 from .mcp_activities import (
     execute_mcp_tool_activity,
@@ -85,16 +96,6 @@ from .types import (
     ToolExecutionInput,
     ToolExecutionResult,
 )
-from collections.abc import AsyncGenerator
-from datetime import timedelta
-
-# Import TypedEvent for proper event yielding
-# This import is safe in workflow context due to sandbox passthrough
-from strands.tools.executors._executor import ToolExecutor as StrandsToolExecutor
-from strands.types._events import ToolCancelEvent, ToolInterruptEvent, ToolResultEvent, TypedEvent
-from temporalio import workflow
-from temporalio.common import RetryPolicy
-from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
@@ -431,9 +432,7 @@ class TemporalToolExecutor(StrandsToolExecutor):
 
         if workflow.patched("parallel-tool-execution-v1"):
             # Parallel: launch all tool activities concurrently
-            activity_results = await asyncio.gather(
-                *[self._execute_single_tool(tu) for tu, _tf in tools_to_execute]
-            )
+            activity_results = await asyncio.gather(*[self._execute_single_tool(tu) for tu, _tf in tools_to_execute])
             for (tool_use, tool_func), result in zip(tools_to_execute, activity_results, strict=True):
                 tool_result: ToolResult = {
                     "toolUseId": result.tool_use_id,
@@ -482,7 +481,7 @@ class TemporalToolExecutor(StrandsToolExecutor):
         mcp_info = get_mcp_server_for_tool(tool_name, self._mcp_tools)
 
         if mcp_info is not None:
-            server_id, mcp_spec = mcp_info
+            server_id, _mcp_spec = mcp_info
             return await self._execute_mcp_tool(
                 server_id=server_id,
                 tool_name=tool_name,
@@ -533,9 +532,17 @@ class TemporalToolExecutor(StrandsToolExecutor):
 
         # Per-tool config lookup: tool_configs[name] → default
         tool_config = self._tool_configs.get(tool_name)
-        timeout = tool_config.start_to_close_timeout if tool_config and tool_config.start_to_close_timeout else self._activity_timeout
+        timeout = (
+            tool_config.start_to_close_timeout
+            if tool_config and tool_config.start_to_close_timeout
+            else self._activity_timeout
+        )
         retry = tool_config.get_retry_policy(self._retry_policy) if tool_config else self._retry_policy
-        heartbeat_timeout = timedelta(seconds=tool_config.heartbeat_timeout) if tool_config and tool_config.heartbeat_timeout else timedelta(seconds=25)
+        heartbeat_timeout = (
+            timedelta(seconds=tool_config.heartbeat_timeout)
+            if tool_config and tool_config.heartbeat_timeout
+            else timedelta(seconds=25)
+        )
 
         result: ToolExecutionResult = await workflow.execute_activity(
             execute_tool_activity,
@@ -583,9 +590,17 @@ class TemporalToolExecutor(StrandsToolExecutor):
 
         # Per-tool config lookup: tool_configs[name] → default
         tool_config = self._tool_configs.get(tool_name)
-        timeout = tool_config.start_to_close_timeout if tool_config and tool_config.start_to_close_timeout else self._activity_timeout
+        timeout = (
+            tool_config.start_to_close_timeout
+            if tool_config and tool_config.start_to_close_timeout
+            else self._activity_timeout
+        )
         retry = tool_config.get_retry_policy(self._retry_policy) if tool_config else self._retry_policy
-        heartbeat_timeout = timedelta(seconds=tool_config.heartbeat_timeout) if tool_config and tool_config.heartbeat_timeout else timedelta(seconds=25)
+        heartbeat_timeout = (
+            timedelta(seconds=tool_config.heartbeat_timeout)
+            if tool_config and tool_config.heartbeat_timeout
+            else timedelta(seconds=25)
+        )
 
         result: MCPToolExecutionResult = await workflow.execute_activity(
             execute_mcp_tool_activity,

@@ -92,6 +92,19 @@ Architecture:
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator, AsyncIterator
+from datetime import timedelta
+from typing import Any, TypeVar
+
+from pydantic import BaseModel as PydanticBaseModel
+from strands import Agent
+from strands.models.model import Model as StrandsModel
+from strands.types.content import Messages, SystemContentBlock
+from strands.types.streaming import StreamEvent
+from strands.types.tools import ToolChoice, ToolSpec
+from temporalio import workflow
+from temporalio.common import RetryPolicy
+
 from .activities import execute_model_activity, execute_structured_output_activity
 from .tool_executor import TemporalToolExecutor
 from .types import (
@@ -103,17 +116,6 @@ from .types import (
     StructuredOutputResult,
     TemporalToolConfig,
 )
-from collections.abc import AsyncGenerator, AsyncIterator
-from datetime import timedelta
-from pydantic import BaseModel as PydanticBaseModel
-from strands import Agent
-from strands.models.model import Model as StrandsModel
-from strands.types.content import Messages, SystemContentBlock
-from strands.types.streaming import StreamEvent
-from strands.types.tools import ToolChoice, ToolSpec
-from temporalio import workflow
-from temporalio.common import RetryPolicy
-from typing import Any, TypeVar
 
 
 T = TypeVar("T", bound=PydanticBaseModel)

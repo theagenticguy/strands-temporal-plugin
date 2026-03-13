@@ -1,0 +1,41 @@
+commit-msg:
+  jobs:
+    - name: conventional-commit
+      run: uv run cz check --commit-msg-file {1}
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: ruff-check
+      run: uvx ruff check --fix {staged_files}
+      glob: "*.py"
+      stage_fixed: true
+
+    - name: ruff-format
+      run: uvx ruff format {staged_files}
+      glob: "*.py"
+      stage_fixed: true
+
+    - name: gitleaks
+      run: gitleaks protect --staged --no-banner
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: lint
+      run: uvx ruff check src/
+
+    - name: format-check
+      run: uvx ruff format --check src/
+
+    - name: typecheck
+      run: uvx ty check src/
+
+    - name: test
+      run: uv run pytest tests/unit/ -x -q
+
+    - name: gitleaks
+      run: gitleaks detect --source . --no-banner
+
+    - name: semgrep
+      run: semgrep scan --config auto --config p/owasp-top-ten --error --quiet src/

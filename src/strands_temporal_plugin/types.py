@@ -8,9 +8,10 @@ data converter using the Pydantic payload converter.
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Annotated, Any, Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 from temporalio.common import RetryPolicy
-from typing import Annotated, Any, Literal
 
 
 # =============================================================================
@@ -462,7 +463,9 @@ class TemporalToolConfig(BaseModel):
     def get_retry_policy(self, fallback: RetryPolicy) -> RetryPolicy:
         """Build a RetryPolicy, falling back to the provided default for unset fields."""
         return RetryPolicy(
-            maximum_attempts=self.retry_max_attempts if self.retry_max_attempts is not None else fallback.maximum_attempts,
+            maximum_attempts=self.retry_max_attempts
+            if self.retry_max_attempts is not None
+            else fallback.maximum_attempts,
             initial_interval=(
                 timedelta(seconds=self.retry_initial_interval)
                 if self.retry_initial_interval is not None
@@ -474,7 +477,9 @@ class TemporalToolConfig(BaseModel):
                 else fallback.maximum_interval
             ),
             backoff_coefficient=(
-                self.retry_backoff_coefficient if self.retry_backoff_coefficient is not None else fallback.backoff_coefficient
+                self.retry_backoff_coefficient
+                if self.retry_backoff_coefficient is not None
+                else fallback.backoff_coefficient
             ),
         )
 
@@ -593,8 +598,12 @@ class CustomProviderConfig(BaseProviderConfig):
 
 
 # Update the ProviderConfig union to include CustomProviderConfig
-ProviderConfig = Annotated[  # noqa: F811
-    BedrockProviderConfig | AnthropicProviderConfig | OpenAIProviderConfig | OllamaProviderConfig | CustomProviderConfig,
+ProviderConfig = Annotated[
+    BedrockProviderConfig
+    | AnthropicProviderConfig
+    | OpenAIProviderConfig
+    | OllamaProviderConfig
+    | CustomProviderConfig,
     Field(discriminator="provider"),
 ]
 
