@@ -255,16 +255,16 @@ class TestPluginConfiguration:
 
     @pytest.mark.asyncio
     async def test_plugin_registers_activities(self):
-        """Test that the plugin properly registers all 4 activities."""
+        """Test that the plugin properly registers all activities."""
         from strands_temporal_plugin.plugin import _merge_activities
 
         # Test with no existing activities
         result = _merge_activities(None)
-        assert len(result) == 4
+        assert len(result) == 7
 
         # Test with empty list
         result = _merge_activities([])
-        assert len(result) == 4
+        assert len(result) == 7
 
     @pytest.mark.asyncio
     async def test_plugin_preserves_existing_activities(self):
@@ -277,8 +277,8 @@ class TestPluginConfiguration:
         existing = [custom_activity]
         result = _merge_activities(existing)
 
-        # Should have custom + 4 plugin activities
-        assert len(result) == 5
+        # Should have custom + 7 plugin activities
+        assert len(result) == 8
         assert custom_activity in result
 
     @pytest.mark.asyncio
