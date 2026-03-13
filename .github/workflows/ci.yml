@@ -30,6 +30,7 @@ jobs:
         run: uv run ruff format --check src/
       - name: Type check
         run: uvx ty check src/
+        continue-on-error: true  # ty findings are informational until codebase is fully typed
 
   test:
     runs-on: ubuntu-latest

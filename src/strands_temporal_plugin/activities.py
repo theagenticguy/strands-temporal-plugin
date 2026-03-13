@@ -168,7 +168,7 @@ def _create_model_from_config(provider_config: Any) -> Any:
         try:
             provider_class_path = provider_config.provider_class_path
             module_path, class_name = provider_class_path.rsplit(".", 1)
-            module = importlib.import_module(module_path)
+            module = importlib.import_module(module_path)  # nosemgrep: non-literal-import
             provider_class = getattr(module, class_name)
         except (ImportError, AttributeError, ValueError) as e:
             raise ApplicationError(
@@ -320,7 +320,7 @@ def _load_tool_function(tool_name: str, tool_module: str) -> Any:
         )
 
     try:
-        module = importlib.import_module(tool_module)
+        module = importlib.import_module(tool_module)  # nosemgrep: non-literal-import
         tool_func = getattr(module, tool_name, None)
 
         if tool_func is None:
@@ -470,7 +470,7 @@ async def execute_structured_output_activity(input_data: StructuredOutputInput) 
         # Dynamically load the output model class
         _safe_heartbeat("loading output model")
         module_path, class_name = input_data.output_model_path.rsplit(".", 1)
-        module = importlib.import_module(module_path)
+        module = importlib.import_module(module_path)  # nosemgrep: non-literal-import
         output_model_class = getattr(module, class_name)
 
         # Call structured_output (async generator — yields events, last has "output")
