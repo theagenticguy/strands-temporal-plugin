@@ -51,8 +51,11 @@ class WeatherAnalysisWorkflow:
             )
         )
 
-        result = await model.structured_output(WeatherAnalysis, prompt)
-        return result.model_dump()
+        messages = [{"role": "user", "content": [{"text": prompt}]}]
+        result_event = None
+        async for event in model.structured_output(WeatherAnalysis, messages):
+            result_event = event
+        return result_event["output"].model_dump()
 
 
 @workflow.defn
@@ -87,5 +90,8 @@ class MovieReviewWorkflow:
             )
         )
 
-        result = await model.structured_output(MovieReview, prompt)
-        return result.model_dump()
+        messages = [{"role": "user", "content": [{"text": prompt}]}]
+        result_event = None
+        async for event in model.structured_output(MovieReview, messages):
+            result_event = event
+        return result_event["output"].model_dump()

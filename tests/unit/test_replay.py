@@ -19,6 +19,38 @@ from strands_temporal_plugin.types import (
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
+def _make_hook_mocks(tool_uses):
+    """Create before/after hook mocks that pass through tool_uses unchanged."""
+    before_events = {}
+    for tu in tool_uses:
+        evt = MagicMock()
+        evt.cancel_tool = False
+        evt.tool_use = tu
+        evt.selected_tool = MagicMock()
+        before_events[tu["toolUseId"]] = evt
+
+    def before_hook_side_effect(_agent, _tool_func, tool_use, _invocation_state):
+        return (before_events[tool_use["toolUseId"]], [])
+
+    after_results = {}
+
+    def after_hook_side_effect(_agent, _tool_func, tool_use, _invocation_state, result, **_kw):
+        evt = MagicMock()
+        evt.result = result
+        after_results[tool_use.get("toolUseId") or tool_use["toolUseId"]] = evt
+        return (evt, [])
+
+    return AsyncMock(side_effect=before_hook_side_effect), AsyncMock(side_effect=after_hook_side_effect)
+
+
+def _make_agent_mock(tool_names):
+    """Create a mock agent with tool_registry for hook tests."""
+    mock_agent = MagicMock()
+    mock_agent.tool_registry.dynamic_tools = {}
+    mock_agent.tool_registry.registry = {name: MagicMock() for name in tool_names}
+    return mock_agent
+
+
 # =============================================================================
 # TemporalModelStub versioning tests
 # =============================================================================
@@ -145,8 +177,10 @@ class TestToolExecutorVersioning:
     """Test that parallel-tool-execution-v1 patch handles both paths correctly."""
 
     @pytest.mark.asyncio
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_after_tool_call_hook")
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_before_tool_call_hook")
     @patch("strands_temporal_plugin.tool_executor.workflow")
-    async def test_parallel_path_executes_concurrently(self, mock_workflow):
+    async def test_parallel_path_executes_concurrently(self, mock_workflow, mock_before_hook, mock_after_hook):
         """Test patched path uses asyncio.gather for parallel execution."""
         mock_workflow.patched.return_value = True
 
@@ -154,12 +188,8 @@ class TestToolExecutorVersioning:
             ToolExecutionResult(tool_use_id="t1", status="success", content=[{"text": "r1"}]),
             ToolExecutionResult(tool_use_id="t2", status="success", content=[{"text": "r2"}]),
         ]
-        call_count = 0
 
         async def mock_execute_activity(_activity, input_data, **_kwargs):
-            nonlocal call_count
-            call_count += 1
-            # Return result based on tool_use_id
             if hasattr(input_data, "tool_use_id"):
                 for r in tool_results:
                     if r.tool_use_id == input_data.tool_use_id:
@@ -168,19 +198,22 @@ class TestToolExecutorVersioning:
 
         mock_workflow.execute_activity = mock_execute_activity
 
-        executor = TemporalToolExecutor(
-            tool_modules={"tool_a": "mod.a", "tool_b": "mod.b"},
-        )
-
         tool_uses = [
             {"name": "tool_a", "input": {"arg": "1"}, "toolUseId": "t1"},
             {"name": "tool_b", "input": {"arg": "2"}, "toolUseId": "t2"},
         ]
+        before_mock, after_mock = _make_hook_mocks(tool_uses)
+        mock_before_hook.side_effect = before_mock.side_effect
+        mock_after_hook.side_effect = after_mock.side_effect
+
+        executor = TemporalToolExecutor(
+            tool_modules={"tool_a": "mod.a", "tool_b": "mod.b"},
+        )
 
         results = []
         tool_results_list = []
         async for event in executor._execute(
-            agent=MagicMock(),
+            agent=_make_agent_mock(["tool_a", "tool_b"]),
             tool_uses=tool_uses,
             tool_results=tool_results_list,
             cycle_trace=None,
@@ -196,8 +229,10 @@ class TestToolExecutorVersioning:
         assert tool_results_list[1]["toolUseId"] == "t2"
 
     @pytest.mark.asyncio
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_after_tool_call_hook")
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_before_tool_call_hook")
     @patch("strands_temporal_plugin.tool_executor.workflow")
-    async def test_sequential_path_executes_in_order(self, mock_workflow):
+    async def test_sequential_path_executes_in_order(self, mock_workflow, mock_before_hook, mock_after_hook):
         """Test unpatched path executes tools sequentially."""
         mock_workflow.patched.return_value = False
 
@@ -214,19 +249,22 @@ class TestToolExecutorVersioning:
 
         mock_workflow.execute_activity = mock_execute_activity
 
-        executor = TemporalToolExecutor(
-            tool_modules={"tool_a": "mod.a", "tool_b": "mod.b"},
-        )
-
         tool_uses = [
             {"name": "tool_a", "input": {}, "toolUseId": "t1"},
             {"name": "tool_b", "input": {}, "toolUseId": "t2"},
         ]
+        before_mock, after_mock = _make_hook_mocks(tool_uses)
+        mock_before_hook.side_effect = before_mock.side_effect
+        mock_after_hook.side_effect = after_mock.side_effect
+
+        executor = TemporalToolExecutor(
+            tool_modules={"tool_a": "mod.a", "tool_b": "mod.b"},
+        )
 
         results = []
         tool_results_list = []
         async for event in executor._execute(
-            agent=MagicMock(),
+            agent=_make_agent_mock(["tool_a", "tool_b"]),
             tool_uses=tool_uses,
             tool_results=tool_results_list,
             cycle_trace=None,
@@ -240,8 +278,10 @@ class TestToolExecutorVersioning:
         assert execution_order == ["t1", "t2"]
 
     @pytest.mark.asyncio
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_after_tool_call_hook")
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_before_tool_call_hook")
     @patch("strands_temporal_plugin.tool_executor.workflow")
-    async def test_both_paths_produce_same_results(self, mock_workflow):
+    async def test_both_paths_produce_same_results(self, mock_workflow, mock_before_hook, mock_after_hook):
         """Verify parallel and sequential paths produce identical tool results.
 
         Order of results must match order of tool_uses in both paths.
@@ -266,13 +306,16 @@ class TestToolExecutorVersioning:
             {"name": "tool_b", "input": {}, "toolUseId": "t2"},
             {"name": "tool_c", "input": {}, "toolUseId": "t3"},
         ]
+        before_mock, after_mock = _make_hook_mocks(tool_uses)
+        mock_before_hook.side_effect = before_mock.side_effect
+        mock_after_hook.side_effect = after_mock.side_effect
 
         # Parallel path
         mock_workflow.patched.return_value = True
         parallel_results = []
         parallel_tool_results = []
         async for event in executor._execute(
-            agent=MagicMock(),
+            agent=_make_agent_mock(["tool_a", "tool_b", "tool_c"]),
             tool_uses=tool_uses,
             tool_results=parallel_tool_results,
             cycle_trace=None,
@@ -281,12 +324,17 @@ class TestToolExecutorVersioning:
         ):
             parallel_results.append(event)
 
+        # Reset hook mocks for sequential path
+        before_mock2, after_mock2 = _make_hook_mocks(tool_uses)
+        mock_before_hook.side_effect = before_mock2.side_effect
+        mock_after_hook.side_effect = after_mock2.side_effect
+
         # Sequential path
         mock_workflow.patched.return_value = False
         sequential_results = []
         sequential_tool_results = []
         async for event in executor._execute(
-            agent=MagicMock(),
+            agent=_make_agent_mock(["tool_a", "tool_b", "tool_c"]),
             tool_uses=tool_uses,
             tool_results=sequential_tool_results,
             cycle_trace=None,
@@ -312,8 +360,10 @@ class TestPerToolConfigWithVersioning:
     """Verify per-tool config works correctly with versioning gates."""
 
     @pytest.mark.asyncio
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_after_tool_call_hook")
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_before_tool_call_hook")
     @patch("strands_temporal_plugin.tool_executor.workflow")
-    async def test_parallel_path_respects_per_tool_config(self, mock_workflow):
+    async def test_parallel_path_respects_per_tool_config(self, mock_workflow, mock_before_hook, mock_after_hook):
         """Ensure per-tool configs are applied correctly in parallel execution."""
         mock_workflow.patched.return_value = True
 
@@ -345,10 +395,13 @@ class TestPerToolConfigWithVersioning:
             {"name": "fast_tool", "input": {}, "toolUseId": "t1"},
             {"name": "slow_tool", "input": {}, "toolUseId": "t2"},
         ]
+        before_mock, after_mock = _make_hook_mocks(tool_uses)
+        mock_before_hook.side_effect = before_mock.side_effect
+        mock_after_hook.side_effect = after_mock.side_effect
 
         results = []
         async for event in executor._execute(
-            agent=MagicMock(),
+            agent=_make_agent_mock(["fast_tool", "slow_tool"]),
             tool_uses=tool_uses,
             tool_results=[],
             cycle_trace=None,
@@ -394,10 +447,14 @@ class TestStructuredOutputVersioning:
         mock_model_class.__qualname__ = "WeatherAnalysis"
         mock_model_class.model_validate.return_value = {"city": "Seattle", "temperature_f": 55.0}
 
-        await stub.structured_output(
+        # structured_output now takes Messages and returns AsyncGenerator
+        messages = [{"role": "user", "content": [{"text": "Analyze weather in Seattle"}]}]
+        result_event = None
+        async for event in stub.structured_output(
             output_model=mock_model_class,
-            prompt="Analyze weather in Seattle",
-        )
+            prompt=messages,
+        ):
+            result_event = event
 
         # Verify activity was called
         mock_workflow.execute_activity.assert_called_once()
@@ -405,6 +462,10 @@ class TestStructuredOutputVersioning:
         activity_input = call_args[0][1]  # second positional arg
         assert activity_input.output_model_path == "models.WeatherAnalysis"
         assert activity_input.prompt == "Analyze weather in Seattle"
+
+        # Verify the generator yielded an output event
+        assert result_event is not None
+        assert "output" in result_event
 
         # Verify model_validate was called with the output dict
         mock_model_class.model_validate.assert_called_once_with({"city": "Seattle", "temperature_f": 55.0})

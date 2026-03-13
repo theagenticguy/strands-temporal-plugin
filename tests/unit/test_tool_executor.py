@@ -2,6 +2,7 @@
 
 import json
 import pytest
+from strands.tools.executors._executor import ToolExecutor as StrandsToolExecutor
 from strands_temporal_plugin.tool_executor import TemporalToolExecutor
 from strands_temporal_plugin.types import MCPToolSpec, StdioMCPServerConfig, ToolExecutorConfig
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -265,7 +266,9 @@ class TestTemporalToolExecutorIntegration:
 
     @pytest.mark.asyncio
     @patch("strands_temporal_plugin.tool_executor.workflow")
-    async def test_execute_routes_to_mcp_activity(self, mock_workflow):
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_after_tool_call_hook")
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_before_tool_call_hook")
+    async def test_execute_routes_to_mcp_activity(self, mock_before_hook, mock_after_hook, mock_workflow):
         """Test that _execute routes MCP tools to MCP activity."""
         from strands_temporal_plugin.types import MCPToolExecutionResult
 
@@ -287,6 +290,17 @@ class TestTemporalToolExecutorIntegration:
             )
         }
 
+        # Mock hooks
+        mock_before_event = MagicMock()
+        mock_before_event.cancel_tool = False
+        mock_before_event.tool_use = {"name": "search_docs", "toolUseId": "tool_123", "input": {"query": "lambda"}}
+        mock_before_event.selected_tool = MagicMock()
+        mock_before_hook.return_value = (mock_before_event, [])
+
+        mock_after_event = MagicMock()
+        mock_after_event.result = {"toolUseId": "tool_123", "status": "success", "content": [{"text": "Found 5 results"}]}
+        mock_after_hook.return_value = (mock_after_event, [])
+
         # Mock activity result
         mock_result = MCPToolExecutionResult(
             tool_use_id="tool_123",
@@ -297,6 +311,8 @@ class TestTemporalToolExecutorIntegration:
 
         # Create mock agent and tool_uses
         mock_agent = MagicMock()
+        mock_agent.tool_registry.dynamic_tools = {}
+        mock_agent.tool_registry.registry = {}
         tool_uses = [
             {
                 "name": "search_docs",
@@ -326,7 +342,9 @@ class TestTemporalToolExecutorIntegration:
 
     @pytest.mark.asyncio
     @patch("strands_temporal_plugin.tool_executor.workflow")
-    async def test_execute_routes_to_static_activity(self, mock_workflow):
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_after_tool_call_hook")
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_before_tool_call_hook")
+    async def test_execute_routes_to_static_activity(self, mock_before_hook, mock_after_hook, mock_workflow):
         """Test that _execute routes static tools to tool activity."""
         from strands_temporal_plugin.types import ToolExecutionResult
 
@@ -334,6 +352,17 @@ class TestTemporalToolExecutorIntegration:
         executor = TemporalToolExecutor(
             tool_modules={"get_weather": "myapp.tools"}
         )
+
+        # Mock hooks
+        mock_before_event = MagicMock()
+        mock_before_event.cancel_tool = False
+        mock_before_event.tool_use = {"name": "get_weather", "toolUseId": "tool_456", "input": {"city": "Seattle"}}
+        mock_before_event.selected_tool = MagicMock()
+        mock_before_hook.return_value = (mock_before_event, [])
+
+        mock_after_event = MagicMock()
+        mock_after_event.result = {"toolUseId": "tool_456", "status": "success", "content": [{"text": "Weather: Sunny, 72°F"}]}
+        mock_after_hook.return_value = (mock_after_event, [])
 
         # Mock activity result
         mock_result = ToolExecutionResult(
@@ -345,6 +374,8 @@ class TestTemporalToolExecutorIntegration:
 
         # Create mock agent and tool_uses
         mock_agent = MagicMock()
+        mock_agent.tool_registry.dynamic_tools = {}
+        mock_agent.tool_registry.registry = {"get_weather": MagicMock()}
         tool_uses = [
             {
                 "name": "get_weather",
@@ -372,3 +403,106 @@ class TestTemporalToolExecutorIntegration:
         assert events[0]["tool_result"]["status"] == "success"
         assert len(tool_results) == 1
         assert tool_results[0]["toolUseId"] == "tool_456"
+
+
+class TestTemporalToolExecutorABC:
+    """Test TemporalToolExecutor ABC subclassing."""
+
+    def test_is_strands_tool_executor(self):
+        """Test that TemporalToolExecutor is a subclass of the Strands ToolExecutor ABC."""
+        executor = TemporalToolExecutor()
+        assert isinstance(executor, StrandsToolExecutor)
+
+    @pytest.mark.asyncio
+    @patch("strands_temporal_plugin.tool_executor.workflow")
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_after_tool_call_hook")
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_before_tool_call_hook")
+    async def test_hooks_are_fired(self, mock_before_hook, mock_after_hook, mock_workflow):
+        """Test that before/after tool call hooks are fired during execution."""
+        from strands_temporal_plugin.types import ToolExecutionResult
+
+        mock_workflow.patched.return_value = False
+
+        # Mock before hook: no interrupts, no cancel
+        mock_before_event = MagicMock()
+        mock_before_event.cancel_tool = False
+        mock_before_event.tool_use = {"name": "get_weather", "toolUseId": "t1", "input": {"city": "Seattle"}}
+        mock_before_event.selected_tool = MagicMock()
+        mock_before_hook.return_value = (mock_before_event, [])
+
+        # Mock after hook
+        mock_after_event = MagicMock()
+        mock_after_event.result = {"toolUseId": "t1", "status": "success", "content": [{"text": "Sunny"}]}
+        mock_after_hook.return_value = (mock_after_event, [])
+
+        # Mock activity result
+        mock_result = ToolExecutionResult(
+            tool_use_id="t1", status="success", content=[{"text": "Sunny"}]
+        )
+        mock_workflow.execute_activity = AsyncMock(return_value=mock_result)
+
+        executor = TemporalToolExecutor(tool_modules={"get_weather": "myapp.tools"})
+
+        mock_agent = MagicMock()
+        mock_agent.tool_registry.dynamic_tools = {}
+        mock_agent.tool_registry.registry = {"get_weather": MagicMock()}
+
+        tool_uses = [{"name": "get_weather", "toolUseId": "t1", "input": {"city": "Seattle"}}]
+        tool_results = []
+
+        events = []
+        async for event in executor._execute(
+            agent=mock_agent,
+            tool_uses=tool_uses,
+            tool_results=tool_results,
+            cycle_trace=None,
+            cycle_span=None,
+            invocation_state={},
+        ):
+            events.append(event)
+
+        # Verify hooks were called
+        mock_before_hook.assert_called_once()
+        mock_after_hook.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("strands_temporal_plugin.tool_executor.workflow")
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_after_tool_call_hook")
+    @patch("strands_temporal_plugin.tool_executor.StrandsToolExecutor._invoke_before_tool_call_hook")
+    async def test_cancel_tool_skips_execution(self, mock_before_hook, mock_after_hook, mock_workflow):
+        """Test that cancel_tool in before hook skips activity execution."""
+        mock_workflow.patched.return_value = False
+
+        # Mock before hook: cancel the tool
+        mock_before_event = MagicMock()
+        mock_before_event.cancel_tool = "User cancelled this tool"
+        mock_before_hook.return_value = (mock_before_event, [])
+
+        # Mock after hook for cancel path
+        mock_after_event = MagicMock()
+        mock_after_event.result = {"toolUseId": "t1", "status": "error", "content": [{"text": "User cancelled this tool"}]}
+        mock_after_hook.return_value = (mock_after_event, [])
+
+        executor = TemporalToolExecutor(tool_modules={"get_weather": "myapp.tools"})
+
+        mock_agent = MagicMock()
+        mock_agent.tool_registry.dynamic_tools = {}
+        mock_agent.tool_registry.registry = {"get_weather": MagicMock()}
+
+        tool_uses = [{"name": "get_weather", "toolUseId": "t1", "input": {"city": "Seattle"}}]
+        tool_results = []
+
+        events = []
+        async for event in executor._execute(
+            agent=mock_agent,
+            tool_uses=tool_uses,
+            tool_results=tool_results,
+            cycle_trace=None,
+            cycle_span=None,
+            invocation_state={},
+        ):
+            events.append(event)
+
+        # Should have cancel event + result event, but NO activity call
+        assert len(events) == 2  # ToolCancelEvent + ToolResultEvent
+        mock_workflow.execute_activity.assert_not_called()

@@ -2,8 +2,9 @@
 
 import pytest
 from strands import tool
+from strands.models.model import Model as StrandsModel
 from strands_temporal_plugin import BedrockProviderConfig
-from strands_temporal_plugin.runner import _extract_tool_modules, create_durable_agent
+from strands_temporal_plugin.runner import TemporalModelStub, _extract_tool_modules, create_durable_agent
 
 
 @tool
@@ -140,3 +141,35 @@ def test_create_durable_agent_main_module_with_explicit_works():
     )
 
     assert agent.tool_executor.tool_modules["main_tool"] == "myapp.tools"
+
+
+def test_temporal_model_stub_is_strands_model():
+    """Test that TemporalModelStub is a subclass of the Strands Model ABC."""
+    stub = TemporalModelStub(BedrockProviderConfig(model_id="test"))
+    assert isinstance(stub, StrandsModel)
+
+
+@pytest.mark.asyncio
+async def test_stream_accepts_keyword_only_params():
+    """Test that stream() accepts the SDK's keyword-only params without error."""
+    from strands_temporal_plugin.types import ModelExecutionResult
+    from unittest.mock import AsyncMock, patch
+
+    with patch("strands_temporal_plugin.runner.workflow") as mock_workflow:
+        mock_workflow.patched.return_value = True
+        mock_result = ModelExecutionResult(events=[{"messageStart": {"role": "assistant"}}])
+        mock_workflow.execute_activity = AsyncMock(return_value=mock_result)
+
+        stub = TemporalModelStub(BedrockProviderConfig(model_id="test"))
+        events = []
+        async for event in stub.stream(
+            messages=[{"role": "user", "content": [{"text": "Hi"}]}],
+            tool_specs=None,
+            system_prompt=None,
+            tool_choice=None,
+            system_prompt_content=None,
+            invocation_state={"key": "value"},
+        ):
+            events.append(event)
+
+        assert len(events) == 1

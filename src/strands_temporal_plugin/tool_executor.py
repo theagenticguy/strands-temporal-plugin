@@ -90,7 +90,8 @@ from datetime import timedelta
 
 # Import TypedEvent for proper event yielding
 # This import is safe in workflow context due to sandbox passthrough
-from strands.types._events import ToolResultEvent, TypedEvent
+from strands.tools.executors._executor import ToolExecutor as StrandsToolExecutor
+from strands.types._events import ToolCancelEvent, ToolInterruptEvent, ToolResultEvent, TypedEvent
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 from typing import TYPE_CHECKING, Any
@@ -142,7 +143,7 @@ def _create_mcp_proxy_tool(mcp_spec: MCPToolSpec) -> Any:
     return decorated
 
 
-class TemporalToolExecutor:
+class TemporalToolExecutor(StrandsToolExecutor):
     """Tool executor that routes tool calls to Temporal activities.
 
     This class implements the Strands ToolExecutor interface but instead of
@@ -360,6 +361,10 @@ class TemporalToolExecutor:
         need to be executed. It routes each tool call to an appropriate
         Temporal activity.
 
+        Approach (A) for hooks: fire before hooks sequentially (they're fast,
+        local, and support cancel_tool), then execute tools in parallel/sequential
+        based on versioning gate, then fire after hooks sequentially.
+
         For workflows started after the parallel-tool-execution-v1 patch,
         multiple tool calls from a single model response are executed
         concurrently via asyncio.gather(). Older workflows replay with
@@ -377,28 +382,85 @@ class TemporalToolExecutor:
         Yields:
             TypedEvent: Tool result events (ToolResultEvent instances)
         """
+        # Phase 1: Fire before hooks sequentially and determine which tools to execute
+        tools_to_execute: list[tuple[ToolUse, Any]] = []  # (tool_use, tool_func)
+        cancelled_tools: list[tuple[ToolUse, str]] = []  # (tool_use, cancel_message)
+
+        for tool_use in tool_uses:
+            tool_name = tool_use["name"]
+            tool_func = None
+            if hasattr(agent, "tool_registry"):
+                tool_func = getattr(agent.tool_registry, "dynamic_tools", {}).get(tool_name)
+                if tool_func is None:
+                    tool_func = agent.tool_registry.registry.get(tool_name)
+
+            before_event, interrupts = await StrandsToolExecutor._invoke_before_tool_call_hook(
+                agent, tool_func, tool_use, invocation_state
+            )
+
+            if interrupts:
+                yield ToolInterruptEvent(tool_use, interrupts)
+                return
+
+            if before_event.cancel_tool:
+                cancel_message = (
+                    before_event.cancel_tool if isinstance(before_event.cancel_tool, str) else "tool cancelled by user"
+                )
+                cancelled_tools.append((tool_use, cancel_message))
+            else:
+                # Use the potentially modified tool_use from the hook
+                tools_to_execute.append((before_event.tool_use, before_event.selected_tool))
+
+        # Phase 2: Handle cancelled tools (yield cancel events + after hooks)
+        for tool_use, cancel_message in cancelled_tools:
+            yield ToolCancelEvent(tool_use, cancel_message)
+            cancel_result: ToolResult = {
+                "toolUseId": str(tool_use.get("toolUseId")),
+                "status": "error",
+                "content": [{"text": cancel_message}],
+            }
+            after_event, _ = await StrandsToolExecutor._invoke_after_tool_call_hook(
+                agent, None, tool_use, invocation_state, cancel_result, cancel_message=cancel_message
+            )
+            tool_results.append(after_event.result)
+            yield ToolResultEvent(tool_result=after_event.result)
+
+        # Phase 3: Execute non-cancelled tools via Temporal activities
+        if not tools_to_execute:
+            return
+
         if workflow.patched("parallel-tool-execution-v1"):
             # Parallel: launch all tool activities concurrently
-            results = await asyncio.gather(*[self._execute_single_tool(tool_use) for tool_use in tool_uses])
-            for result in results:
+            activity_results = await asyncio.gather(
+                *[self._execute_single_tool(tu) for tu, _tf in tools_to_execute]
+            )
+            for (tool_use, tool_func), result in zip(tools_to_execute, activity_results, strict=True):
                 tool_result: ToolResult = {
                     "toolUseId": result.tool_use_id,
                     "status": result.status,
                     "content": result.content,
                 }
-                tool_results.append(tool_result)
-                yield ToolResultEvent(tool_result=tool_result)
+                # Phase 4: Fire after hooks
+                after_event, _ = await StrandsToolExecutor._invoke_after_tool_call_hook(
+                    agent, tool_func, tool_use, invocation_state, tool_result
+                )
+                tool_results.append(after_event.result)
+                yield ToolResultEvent(tool_result=after_event.result)
         else:
             # Sequential: original behavior for replay compatibility with pre-v1 workflows
-            for tool_use in tool_uses:
+            for tool_use, tool_func in tools_to_execute:
                 result = await self._execute_single_tool(tool_use)
                 tool_result: ToolResult = {
                     "toolUseId": result.tool_use_id,
                     "status": result.status,
                     "content": result.content,
                 }
-                tool_results.append(tool_result)
-                yield ToolResultEvent(tool_result=tool_result)
+                # Phase 4: Fire after hooks
+                after_event, _ = await StrandsToolExecutor._invoke_after_tool_call_hook(
+                    agent, tool_func, tool_use, invocation_state, tool_result
+                )
+                tool_results.append(after_event.result)
+                yield ToolResultEvent(tool_result=after_event.result)
 
     async def _execute_single_tool(self, tool_use: ToolUse) -> ToolExecutionResult:
         """Execute a single tool via the appropriate Temporal activity.

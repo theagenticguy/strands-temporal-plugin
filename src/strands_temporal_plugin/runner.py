@@ -103,15 +103,20 @@ from .types import (
     StructuredOutputResult,
     TemporalToolConfig,
 )
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import timedelta
+from pydantic import BaseModel as PydanticBaseModel
 from strands import Agent
-from strands.types.content import Messages
+from strands.models.model import Model as StrandsModel
+from strands.types.content import Messages, SystemContentBlock
 from strands.types.streaming import StreamEvent
-from strands.types.tools import ToolSpec
+from strands.types.tools import ToolChoice, ToolSpec
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from typing import Any
+from typing import Any, TypeVar
+
+
+T = TypeVar("T", bound=PydanticBaseModel)
 
 
 def _extract_tool_modules(tools: list[Any]) -> dict[str, str]:
@@ -153,7 +158,17 @@ def _extract_tool_modules(tools: list[Any]) -> dict[str, str]:
     return tool_modules
 
 
-class TemporalModelStub:
+def _extract_text_from_messages(messages: Messages) -> str:
+    """Extract text content from Messages for the structured output activity."""
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            for block in msg.get("content", []):
+                if isinstance(block, dict) and "text" in block:
+                    return block["text"]
+    return str(messages)
+
+
+class TemporalModelStub(StrandsModel):
     """Model stub that routes inference calls to Temporal activities.
 
     This class implements the Strands Model interface but instead of calling
@@ -235,6 +250,10 @@ class TemporalModelStub:
         messages: Messages,
         tool_specs: list[ToolSpec] | None = None,
         system_prompt: str | None = None,
+        *,
+        tool_choice: ToolChoice | None = None,
+        system_prompt_content: list[SystemContentBlock] | None = None,
+        invocation_state: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamEvent]:
         """Route model inference to Temporal activity.
@@ -247,6 +266,9 @@ class TemporalModelStub:
             messages: Conversation history in Strands format
             tool_specs: Tool specifications for the model
             system_prompt: System prompt for the model
+            tool_choice: Selection strategy for tool invocation (accepted for interface compliance)
+            system_prompt_content: System prompt content blocks (accepted for interface compliance)
+            invocation_state: Caller-provided state/context (accepted for interface compliance)
             **kwargs: Additional arguments (passed through)
 
         Yields:
@@ -295,11 +317,11 @@ class TemporalModelStub:
 
     async def structured_output(
         self,
-        output_model: Any,
-        prompt: str,
+        output_model: type[T],
+        prompt: Messages,
         system_prompt: str | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> AsyncGenerator[dict[str, T | Any]]:
         """Route structured output to Temporal activity.
 
         The output_model (a Pydantic class) is serialized as its import path,
@@ -308,16 +330,19 @@ class TemporalModelStub:
 
         Args:
             output_model: Pydantic model class for output validation
-            prompt: The prompt to send to the model
+            prompt: The prompt messages to send to the model
             system_prompt: Optional system prompt
             **kwargs: Additional arguments
 
-        Returns:
-            Instance of output_model with validated fields
+        Yields:
+            Dict with "output" key containing the validated model instance
 
         Raises:
             ApplicationError: If the model class cannot be resolved or validation fails
         """
+        # Extract text from Messages for the activity (which expects a string prompt)
+        text_prompt = _extract_text_from_messages(prompt)
+
         # Resolve the class to an import path
         model_module = output_model.__module__
         model_name = output_model.__qualname__
@@ -326,7 +351,7 @@ class TemporalModelStub:
         activity_input = StructuredOutputInput(
             provider_config=self._provider_config,
             output_model_path=output_model_path,
-            prompt=prompt,
+            prompt=text_prompt,
             system_prompt=system_prompt,
         )
 
@@ -337,8 +362,9 @@ class TemporalModelStub:
             retry_policy=self._retry_policy,
         )
 
-        # Reconstruct the Pydantic model from the serialized dict
-        return output_model.model_validate(result.output)
+        # Reconstruct the Pydantic model from the serialized dict and yield
+        validated = output_model.model_validate(result.output)
+        yield {"output": validated}
 
 
 # =============================================================================

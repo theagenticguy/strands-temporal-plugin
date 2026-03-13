@@ -49,15 +49,33 @@ _SAFE_PASSTHROUGH_MODULES = (
     "strands.types.event",
     "strands.types._events",  # TypedEvent and event classes (needed for tool executor)
     "strands.types.event_loop",
-    # Strands tool executor base class (for TemporalToolExecutor)
-    # The base class is needed in workflow context for the Agent to use
+    "strands.types.interrupt",  # Interrupt type (needed for hook return values)
+    # Strands Model ABC (for TemporalModelStub subclassing)
+    "strands.models",
+    "strands.models.model",
+    # Strands tool executor base class (for TemporalToolExecutor subclassing)
     "strands.tools",
     "strands.tools.executor",
+    "strands.tools.executors",
+    "strands.tools.executors._executor",
+    # Strands hooks (for before/after tool call events in TemporalToolExecutor)
+    "strands.hooks",
+    "strands.experimental",
+    "strands.experimental.hooks",
+    "strands.experimental.hooks.events",
+    # Strands telemetry (for Trace type in ToolExecutor._execute signature)
+    "strands.telemetry",
+    "strands.telemetry.metrics",
+    "strands.telemetry.tracer",
     # Strands agent core (for Agent class - models do I/O but are replaced)
     "strands.agent",
     # Strands conversation manager (for ConversationManager in workflow context)
     "strands.agent.conversation_manager",
-    # Note: strands.models is NOT passed through - use TemporalModelStub instead
+    # Strands structured output context (for ToolExecutor._execute signature)
+    "strands.tools.structured_output",
+    "strands.tools.structured_output._structured_output_context",
+    # Note: strands.models.* provider implementations are NOT passed through
+    # - use TemporalModelStub instead (I/O happens in activities)
     # Plugin modules (activities/tool_executor/mcp_activities contain activity
     # references used in workflow context via workflow.execute_activity().
     # Actual I/O libraries like boto3/httpx/mcp are imported inside functions,
