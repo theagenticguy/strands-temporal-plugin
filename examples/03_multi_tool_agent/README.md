@@ -175,6 +175,42 @@ BedrockProviderConfig(
 )
 ```
 
+### Per-Tool Configuration (v0.2.0+)
+
+Override timeout, heartbeat, and retry settings per tool:
+
+```python
+from strands_temporal_plugin import TemporalToolConfig
+
+agent = create_durable_agent(
+    provider_config=BedrockProviderConfig(...),
+    tools=[search_web, calculate, send_notification],
+    tool_configs={
+        "search_web": TemporalToolConfig(
+            start_to_close_timeout=120.0,
+            heartbeat_timeout=20.0,
+            retry_max_attempts=5,
+        ),
+        "calculate": TemporalToolConfig(
+            start_to_close_timeout=10.0,
+            retry_max_attempts=1,
+        ),
+    },
+)
+```
+
+### Parallel Tool Execution (v0.2.0+)
+
+When the model returns multiple tool calls in a single response, they execute concurrently via `asyncio.gather()`. This happens automatically - no configuration needed.
+
+To observe parallel execution, use prompts that trigger multiple independent tool calls:
+
+```bash
+uv run python run_client.py general --prompt "Check the weather in Seattle, Tokyo, and London"
+```
+
+In the Temporal UI, you'll see overlapping activity execution bars for the tool calls.
+
 ## Tools
 
 The example includes several tools demonstrating different patterns:

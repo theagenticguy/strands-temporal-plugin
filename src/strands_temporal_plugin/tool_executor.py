@@ -65,6 +65,7 @@ Architecture:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from .activities import execute_tool_activity
 from .mcp_activities import (
@@ -80,6 +81,7 @@ from .types import (
     MCPToolExecutionInput,
     MCPToolExecutionResult,
     MCPToolSpec,
+    TemporalToolConfig,
     ToolExecutionInput,
     ToolExecutionResult,
 )
@@ -88,7 +90,8 @@ from datetime import timedelta
 
 # Import TypedEvent for proper event yielding
 # This import is safe in workflow context due to sandbox passthrough
-from strands.types._events import ToolResultEvent, TypedEvent
+from strands.tools.executors._executor import ToolExecutor as StrandsToolExecutor
+from strands.types._events import ToolCancelEvent, ToolInterruptEvent, ToolResultEvent, TypedEvent
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 from typing import TYPE_CHECKING, Any
@@ -140,7 +143,7 @@ def _create_mcp_proxy_tool(mcp_spec: MCPToolSpec) -> Any:
     return decorated
 
 
-class TemporalToolExecutor:
+class TemporalToolExecutor(StrandsToolExecutor):
     """Tool executor that routes tool calls to Temporal activities.
 
     This class implements the Strands ToolExecutor interface but instead of
@@ -159,13 +162,27 @@ class TemporalToolExecutor:
         tool_modules: Mapping of tool names to module paths for dynamic import
                      Example: {"get_weather": "myapp.tools"}
         mcp_servers: Optional list of MCP server configurations for tool discovery
-        activity_timeout: Timeout for tool activity execution (default 60 seconds)
-        retry_policy: Custom retry policy for tool activities (optional)
+        activity_timeout: Default timeout for tool activity execution (default 60 seconds)
+        retry_policy: Default retry policy for tool activities (optional)
+        tool_configs: Per-tool configuration overrides for timeout, heartbeat, and retry.
+                     Lookup chain: tool_configs[tool_name] → default → hardcoded.
+                     Example: {"slow_search": TemporalToolConfig(start_to_close_timeout=300.0)}
 
     Example:
         # With static tools only
         executor = TemporalToolExecutor(
             tool_modules={"get_weather": "myapp.tools"},
+        )
+
+        # With per-tool config
+        executor = TemporalToolExecutor(
+            tool_modules={"get_weather": "myapp.tools", "slow_search": "myapp.tools"},
+            tool_configs={
+                "slow_search": TemporalToolConfig(
+                    start_to_close_timeout=300.0,
+                    heartbeat_timeout=30.0,
+                ),
+            },
         )
 
         # With MCP servers
@@ -197,14 +214,16 @@ class TemporalToolExecutor:
         mcp_servers: list[MCPServerConfig] | None = None,
         activity_timeout: float = 60.0,
         retry_policy: RetryPolicy | None = None,
+        tool_configs: dict[str, TemporalToolConfig] | None = None,
     ) -> None:
         """Initialize the TemporalToolExecutor.
 
         Args:
             tool_modules: Mapping of tool names to module paths
             mcp_servers: List of MCP server configurations
-            activity_timeout: Timeout in seconds for tool activities
-            retry_policy: Optional custom retry policy
+            activity_timeout: Default timeout in seconds for tool activities
+            retry_policy: Default retry policy
+            tool_configs: Per-tool configuration overrides
         """
         self._tool_modules = tool_modules or {}
         self._mcp_servers = mcp_servers or []
@@ -215,6 +234,7 @@ class TemporalToolExecutor:
             maximum_interval=timedelta(seconds=30),
             backoff_coefficient=2.0,
         )
+        self._tool_configs = tool_configs or {}
 
         # MCP state (populated by discover_mcp_tools)
         self._mcp_tools: list[MCPToolSpec] = []
@@ -278,9 +298,7 @@ class TemporalToolExecutor:
                 retry_policy=self._retry_policy,
             )
 
-            logger.info(
-                f"Discovered {len(result.tools)} tools from MCP server: {server_config.server_id}"
-            )
+            logger.info(f"Discovered {len(result.tools)} tools from MCP server: {server_config.server_id}")
             self._mcp_tools.extend(result.tools)
 
         logger.info(f"Total MCP tools discovered: {len(self._mcp_tools)}")
@@ -343,6 +361,15 @@ class TemporalToolExecutor:
         need to be executed. It routes each tool call to an appropriate
         Temporal activity.
 
+        Approach (A) for hooks: fire before hooks sequentially (they're fast,
+        local, and support cancel_tool), then execute tools in parallel/sequential
+        based on versioning gate, then fire after hooks sequentially.
+
+        For workflows started after the parallel-tool-execution-v1 patch,
+        multiple tool calls from a single model response are executed
+        concurrently via asyncio.gather(). Older workflows replay with
+        sequential execution for compatibility.
+
         Args:
             agent: The Strands Agent instance
             tool_uses: List of tool use requests from the model
@@ -355,46 +382,119 @@ class TemporalToolExecutor:
         Yields:
             TypedEvent: Tool result events (ToolResultEvent instances)
         """
+        # Phase 1: Fire before hooks sequentially and determine which tools to execute
+        tools_to_execute: list[tuple[ToolUse, Any]] = []  # (tool_use, tool_func)
+        cancelled_tools: list[tuple[ToolUse, str]] = []  # (tool_use, cancel_message)
+
         for tool_use in tool_uses:
             tool_name = tool_use["name"]
-            tool_input = tool_use.get("input", {})
-            tool_use_id = tool_use["toolUseId"]
+            tool_func = None
+            if hasattr(agent, "tool_registry"):
+                tool_func = getattr(agent.tool_registry, "dynamic_tools", {}).get(tool_name)
+                if tool_func is None:
+                    tool_func = agent.tool_registry.registry.get(tool_name)
 
-            logger.info(f"Executing tool via activity: {tool_name}")
+            before_event, interrupts = await StrandsToolExecutor._invoke_before_tool_call_hook(
+                agent, tool_func, tool_use, invocation_state
+            )
 
-            # Check if this is an MCP tool
-            mcp_info = get_mcp_server_for_tool(tool_name, self._mcp_tools)
+            if interrupts:
+                yield ToolInterruptEvent(tool_use, interrupts)
+                return
 
-            if mcp_info is not None:
-                # MCP tool - execute via MCP activity
-                server_id, mcp_spec = mcp_info
-                result = await self._execute_mcp_tool(
-                    server_id=server_id,
-                    tool_name=tool_name,
-                    tool_input=tool_input,
-                    tool_use_id=tool_use_id,
+            if before_event.cancel_tool:
+                cancel_message = (
+                    before_event.cancel_tool if isinstance(before_event.cancel_tool, str) else "tool cancelled by user"
                 )
+                cancelled_tools.append((tool_use, cancel_message))
             else:
-                # Static tool - execute via regular tool activity
-                result = await self._execute_static_tool(
-                    tool_name=tool_name,
-                    tool_input=tool_input,
-                    tool_use_id=tool_use_id,
-                )
+                # Use the potentially modified tool_use from the hook
+                tools_to_execute.append((before_event.tool_use, before_event.selected_tool))
 
-            # Build ToolResult in Strands format
-            tool_result: ToolResult = {
-                "toolUseId": result.tool_use_id,
-                "status": result.status,
-                "content": result.content,
+        # Phase 2: Handle cancelled tools (yield cancel events + after hooks)
+        for tool_use, cancel_message in cancelled_tools:
+            yield ToolCancelEvent(tool_use, cancel_message)
+            cancel_result: ToolResult = {
+                "toolUseId": str(tool_use.get("toolUseId")),
+                "status": "error",
+                "content": [{"text": cancel_message}],
             }
+            after_event, _ = await StrandsToolExecutor._invoke_after_tool_call_hook(
+                agent, None, tool_use, invocation_state, cancel_result, cancel_message=cancel_message
+            )
+            tool_results.append(after_event.result)
+            yield ToolResultEvent(tool_result=after_event.result)
 
-            # Append to results list (Strands convention)
-            tool_results.append(tool_result)
+        # Phase 3: Execute non-cancelled tools via Temporal activities
+        if not tools_to_execute:
+            return
 
-            # Yield proper ToolResultEvent (TypedEvent subclass)
-            # This is required by Strands' event loop which calls event.prepare()
-            yield ToolResultEvent(tool_result=tool_result)
+        if workflow.patched("parallel-tool-execution-v1"):
+            # Parallel: launch all tool activities concurrently
+            activity_results = await asyncio.gather(
+                *[self._execute_single_tool(tu) for tu, _tf in tools_to_execute]
+            )
+            for (tool_use, tool_func), result in zip(tools_to_execute, activity_results, strict=True):
+                tool_result: ToolResult = {
+                    "toolUseId": result.tool_use_id,
+                    "status": result.status,
+                    "content": result.content,
+                }
+                # Phase 4: Fire after hooks
+                after_event, _ = await StrandsToolExecutor._invoke_after_tool_call_hook(
+                    agent, tool_func, tool_use, invocation_state, tool_result
+                )
+                tool_results.append(after_event.result)
+                yield ToolResultEvent(tool_result=after_event.result)
+        else:
+            # Sequential: original behavior for replay compatibility with pre-v1 workflows
+            for tool_use, tool_func in tools_to_execute:
+                result = await self._execute_single_tool(tool_use)
+                tool_result: ToolResult = {
+                    "toolUseId": result.tool_use_id,
+                    "status": result.status,
+                    "content": result.content,
+                }
+                # Phase 4: Fire after hooks
+                after_event, _ = await StrandsToolExecutor._invoke_after_tool_call_hook(
+                    agent, tool_func, tool_use, invocation_state, tool_result
+                )
+                tool_results.append(after_event.result)
+                yield ToolResultEvent(tool_result=after_event.result)
+
+    async def _execute_single_tool(self, tool_use: ToolUse) -> ToolExecutionResult:
+        """Execute a single tool via the appropriate Temporal activity.
+
+        Routes to either MCP or static tool execution based on tool registration.
+
+        Args:
+            tool_use: Tool use request from the model
+
+        Returns:
+            ToolExecutionResult with tool output
+        """
+        tool_name = tool_use["name"]
+        tool_input = tool_use.get("input", {})
+        tool_use_id = tool_use["toolUseId"]
+
+        logger.info(f"Executing tool via activity: {tool_name}")
+
+        mcp_info = get_mcp_server_for_tool(tool_name, self._mcp_tools)
+
+        if mcp_info is not None:
+            server_id, mcp_spec = mcp_info
+            return await self._execute_mcp_tool(
+                server_id=server_id,
+                tool_name=tool_name,
+                tool_input=tool_input,
+                tool_use_id=tool_use_id,
+            )
+        else:
+            return await self._execute_static_tool(
+                tool_name=tool_name,
+                tool_input=tool_input,
+                tool_use_id=tool_use_id,
+            )
 
     async def _execute_static_tool(
         self,
@@ -416,18 +516,12 @@ class TemporalToolExecutor:
 
         if not tool_module:
             logger.warning(
-                f"No module path found for tool '{tool_name}'. "
-                f"Registered modules: {list(self._tool_modules.keys())}"
+                f"No module path found for tool '{tool_name}'. Registered modules: {list(self._tool_modules.keys())}"
             )
             return ToolExecutionResult(
                 tool_use_id=tool_use_id,
                 status="error",
-                content=[
-                    {
-                        "text": f"Tool '{tool_name}' not found. "
-                        f"Make sure it's registered in tool_modules."
-                    }
-                ],
+                content=[{"text": f"Tool '{tool_name}' not found. Make sure it's registered in tool_modules."}],
             )
 
         activity_input = ToolExecutionInput(
@@ -437,11 +531,18 @@ class TemporalToolExecutor:
             tool_use_id=tool_use_id,
         )
 
+        # Per-tool config lookup: tool_configs[name] → default
+        tool_config = self._tool_configs.get(tool_name)
+        timeout = tool_config.start_to_close_timeout if tool_config and tool_config.start_to_close_timeout else self._activity_timeout
+        retry = tool_config.get_retry_policy(self._retry_policy) if tool_config else self._retry_policy
+        heartbeat_timeout = timedelta(seconds=tool_config.heartbeat_timeout) if tool_config and tool_config.heartbeat_timeout else timedelta(seconds=25)
+
         result: ToolExecutionResult = await workflow.execute_activity(
             execute_tool_activity,
             activity_input,
-            start_to_close_timeout=timedelta(seconds=self._activity_timeout),
-            retry_policy=self._retry_policy,
+            start_to_close_timeout=timedelta(seconds=timeout),
+            retry_policy=retry,
+            heartbeat_timeout=heartbeat_timeout,
         )
 
         return result
@@ -480,11 +581,18 @@ class TemporalToolExecutor:
             tool_use_id=tool_use_id,
         )
 
+        # Per-tool config lookup: tool_configs[name] → default
+        tool_config = self._tool_configs.get(tool_name)
+        timeout = tool_config.start_to_close_timeout if tool_config and tool_config.start_to_close_timeout else self._activity_timeout
+        retry = tool_config.get_retry_policy(self._retry_policy) if tool_config else self._retry_policy
+        heartbeat_timeout = timedelta(seconds=tool_config.heartbeat_timeout) if tool_config and tool_config.heartbeat_timeout else timedelta(seconds=25)
+
         result: MCPToolExecutionResult = await workflow.execute_activity(
             execute_mcp_tool_activity,
             activity_input,
-            start_to_close_timeout=timedelta(seconds=self._activity_timeout),
-            retry_policy=self._retry_policy,
+            start_to_close_timeout=timedelta(seconds=timeout),
+            retry_policy=retry,
+            heartbeat_timeout=heartbeat_timeout,
         )
 
         # Convert MCPToolExecutionResult to ToolExecutionResult

@@ -69,22 +69,30 @@ Architecture:
 
 from .activities import (
     execute_model_activity,
+    execute_structured_output_activity,
     execute_tool_activity,
 )
-from .runner import TemporalModelStub, create_durable_agent
-from .tool_executor import TemporalToolExecutor
 from .mcp_activities import (
+    close_mcp_clients,
     execute_mcp_tool_activity,
     get_mcp_server_for_tool,
     list_mcp_tools_activity,
     mcp_tool_specs_to_strands,
 )
 from .plugin import StrandsTemporalPlugin
+from .runner import TemporalModelStub, create_durable_agent
+from .session import (
+    TemporalSessionManager,
+    load_session_activity,
+    save_session_activity,
+)
+from .tool_executor import TemporalToolExecutor
 from .types import (
     AnthropicProviderConfig,
     BaseMCPServerConfig,
     BaseProviderConfig,
     BedrockProviderConfig,
+    CustomProviderConfig,
     MCPListToolsInput,
     MCPListToolsResult,
     MCPServerConfig,
@@ -96,8 +104,15 @@ from .types import (
     OllamaProviderConfig,
     OpenAIProviderConfig,
     ProviderConfig,
+    SessionConfig,
+    SessionData,
+    SessionLoadInput,
+    SessionSaveInput,
     StdioMCPServerConfig,
     StreamableHTTPMCPServerConfig,
+    StructuredOutputInput,
+    StructuredOutputResult,
+    TemporalToolConfig,
     ToolExecutionInput,
     ToolExecutionResult,
     ToolExecutorConfig,
@@ -106,7 +121,7 @@ from .types import (
 )
 
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     # Main plugin
@@ -116,12 +131,21 @@ __all__ = [
     "TemporalModelStub",
     "TemporalToolExecutor",
     "ToolExecutorConfig",
+    # Per-tool configuration
+    "TemporalToolConfig",
+    # Session management (S3-backed, activity-driven)
+    "TemporalSessionManager",
+    "SessionConfig",
+    "SessionData",
+    "SessionLoadInput",
+    "SessionSaveInput",
     # Provider configurations
     "BaseProviderConfig",
     "BedrockProviderConfig",
     "AnthropicProviderConfig",
     "OpenAIProviderConfig",
     "OllamaProviderConfig",
+    "CustomProviderConfig",
     "ProviderConfig",
     # MCP server configurations
     "BaseMCPServerConfig",
@@ -133,6 +157,9 @@ __all__ = [
     "ModelExecutionResult",
     "ToolExecutionInput",
     "ToolExecutionResult",
+    # Activity types - Structured Output
+    "StructuredOutputInput",
+    "StructuredOutputResult",
     # Activity types - MCP
     "MCPToolSpec",
     "MCPListToolsInput",
@@ -142,11 +169,15 @@ __all__ = [
     # Activities (for custom registration)
     "execute_model_activity",
     "execute_tool_activity",
+    "execute_structured_output_activity",
     "list_mcp_tools_activity",
     "execute_mcp_tool_activity",
+    "load_session_activity",
+    "save_session_activity",
     # MCP Helpers
     "mcp_tool_specs_to_strands",
     "get_mcp_server_for_tool",
+    "close_mcp_clients",
     # Serialization Helpers
     "messages_to_serializable",
     "tool_specs_to_serializable",

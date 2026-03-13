@@ -41,6 +41,7 @@ from workflows import (
     FinanceAssistant,
     GeneralAssistant,
     NotificationAgent,
+    PerToolConfigAssistant,
     ResearchAssistant,
     WeatherAssistant,
 )
@@ -54,6 +55,7 @@ DEFAULT_PROMPTS = {
     "finance": "Get the current prices for AAPL, GOOGL, and NVDA. Then calculate the total value if I own 5 shares of each.",
     "general": "Check the weather in Miami, search for today's top tech news, and calculate 18% tip on a $85 bill.",
     "convo": "Tell me about the weather in London and what activities you'd recommend.",
+    "per-tool-config": "Search for the latest AI news, look up user123 and send them an email about it, and calculate 42 * 58.",
 }
 
 
@@ -147,6 +149,20 @@ async def run_convo(client: Client, prompt: str) -> str:
     return result
 
 
+async def run_per_tool_config(client: Client, prompt: str) -> str:
+    """Run the PerToolConfigAssistant workflow."""
+    print(f"Running PerToolConfigAssistant...")
+    print(f"  Prompt: {prompt}")
+    print()
+    result = await client.execute_workflow(
+        PerToolConfigAssistant.run,
+        prompt,
+        id=f"per-tool-config-{uuid.uuid4().hex[:8]}",
+        task_queue="durable-agents",
+    )
+    return result
+
+
 RUNNERS = {
     "weather": run_weather,
     "research": run_research,
@@ -154,6 +170,7 @@ RUNNERS = {
     "finance": run_finance,
     "general": run_general,
     "convo": run_convo,
+    "per-tool-config": run_per_tool_config,
 }
 
 
@@ -170,7 +187,7 @@ Examples:
     )
     parser.add_argument(
         "example",
-        choices=["weather", "research", "notify", "finance", "general", "convo", "all"],
+        choices=["weather", "research", "notify", "finance", "general", "convo", "per-tool-config", "all"],
         help="Which example to run",
     )
     parser.add_argument(

@@ -33,7 +33,11 @@ class TestCreateModelFromConfig:
             result = _create_model_from_config(config)
 
             # max_tokens defaults to 4096 in BedrockProviderConfig
-            mock_model_class.assert_called_once_with(model_id="anthropic.claude-3-sonnet", max_tokens=4096)
+            # boto_client_config disables SDK retries (Temporal handles retries)
+            call_kwargs = mock_model_class.call_args[1]
+            assert call_kwargs["model_id"] == "anthropic.claude-3-sonnet"
+            assert call_kwargs["max_tokens"] == 4096
+            assert "boto_client_config" in call_kwargs
             assert result is mock_model_class.return_value
 
     def test_create_bedrock_model_full(self):
@@ -53,14 +57,14 @@ class TestCreateModelFromConfig:
         with patch.dict("sys.modules", {"strands.models": MagicMock(BedrockModel=mock_model_class)}):
             result = _create_model_from_config(config)
 
-            mock_model_class.assert_called_once_with(
-                model_id="anthropic.claude-3-sonnet",
-                region_name="us-west-2",
-                max_tokens=4096,
-                temperature=0.7,
-                top_p=0.9,
-                stop_sequences=["STOP"],
-            )
+            call_kwargs = mock_model_class.call_args[1]
+            assert call_kwargs["model_id"] == "anthropic.claude-3-sonnet"
+            assert call_kwargs["region_name"] == "us-west-2"
+            assert call_kwargs["max_tokens"] == 4096
+            assert call_kwargs["temperature"] == 0.7
+            assert call_kwargs["top_p"] == 0.9
+            assert call_kwargs["stop_sequences"] == ["STOP"]
+            assert "boto_client_config" in call_kwargs
             assert result is mock_model_class.return_value
 
     def test_create_anthropic_model(self):
@@ -73,11 +77,11 @@ class TestCreateModelFromConfig:
         with patch.dict("sys.modules", {"strands.models": MagicMock(AnthropicModel=mock_model_class)}):
             result = _create_model_from_config(config)
 
-            mock_model_class.assert_called_once_with(
-                model_id="claude-3-opus",
-                max_tokens=2048,
-                temperature=0.5,
-            )
+            call_kwargs = mock_model_class.call_args[1]
+            assert call_kwargs["model_id"] == "claude-3-opus"
+            assert call_kwargs["max_tokens"] == 2048
+            assert call_kwargs["temperature"] == 0.5
+            assert call_kwargs["max_retries"] == 0
             assert result is mock_model_class.return_value
 
     def test_create_openai_model(self):
@@ -90,11 +94,11 @@ class TestCreateModelFromConfig:
         with patch.dict("sys.modules", {"strands.models": MagicMock(OpenAIModel=mock_model_class)}):
             result = _create_model_from_config(config)
 
-            mock_model_class.assert_called_once_with(
-                model_id="gpt-4",
-                max_tokens=4096,
-                temperature=0.8,
-            )
+            call_kwargs = mock_model_class.call_args[1]
+            assert call_kwargs["model_id"] == "gpt-4"
+            assert call_kwargs["max_tokens"] == 4096
+            assert call_kwargs["temperature"] == 0.8
+            assert call_kwargs["max_retries"] == 0
             assert result is mock_model_class.return_value
 
     def test_create_ollama_model(self):

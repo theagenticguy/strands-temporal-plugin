@@ -21,7 +21,7 @@ from temporalio.common import RetryPolicy
 
 # Import with sandbox passthrough for workflow context
 with workflow.unsafe.imports_passed_through():
-    from strands_temporal_plugin import BedrockProviderConfig, create_durable_agent
+    from strands_temporal_plugin import BedrockProviderConfig, TemporalToolConfig, create_durable_agent
     from tools import (
         calculate,
         get_stock_price,
@@ -237,6 +237,10 @@ class GeneralAssistant:
 
     Demonstrates how create_durable_agent handles many tools gracefully.
 
+    # NOTE: In v0.2.0+, when the model returns multiple tool calls in a single response,
+    # they execute in parallel via asyncio.gather() (see parallel-tool-execution-v1 patch).
+    # Try prompts like "Check weather in Seattle AND Tokyo AND London" to see parallel execution.
+
     Example:
         result = await client.execute_workflow(
             GeneralAssistant.run,
@@ -329,6 +333,71 @@ class ConversationalAssistant:
             ),
             tools=[get_weather, search_web, calculate],
             system_prompt=system_prompt,
+        )
+
+        result = await agent.invoke_async(prompt)
+        return str(result)
+
+
+# =============================================================================
+# Example 7: Per-Tool Configuration
+# =============================================================================
+
+
+@workflow.defn
+class PerToolConfigAssistant:
+    """Assistant demonstrating per-tool Temporal configuration.
+
+    Shows how to override timeout, heartbeat, and retry settings
+    on a per-tool basis using TemporalToolConfig.
+
+    Example:
+        result = await client.execute_workflow(
+            PerToolConfigAssistant.run,
+            "Search for AI news, send a notification to user123, and calculate 42 * 58",
+            id="per-tool-config-1",
+            task_queue="durable-agents",
+        )
+    """
+
+    @workflow.run
+    async def run(self, prompt: str) -> str:
+        agent = create_durable_agent(
+            provider_config=BedrockProviderConfig(
+                model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+                max_tokens=4096,
+            ),
+            tools=[
+                search_web,
+                send_notification,
+                calculate,
+                get_weather,
+                get_user_info,
+            ],
+            system_prompt=(
+                "You are a versatile assistant. Use the appropriate tools to help the user. "
+                "You can search the web, send notifications, calculate, check weather, and look up users."
+            ),
+            # Per-tool configuration overrides
+            tool_configs={
+                # Web search: longer timeout, more retries (external API)
+                "search_web": TemporalToolConfig(
+                    start_to_close_timeout=120.0,
+                    heartbeat_timeout=20.0,
+                    retry_max_attempts=5,
+                ),
+                # Notifications: many retries with backoff (delivery guarantee)
+                "send_notification": TemporalToolConfig(
+                    retry_max_attempts=10,
+                    retry_initial_interval=2.0,
+                ),
+                # Calculate: short timeout, no retries (pure function)
+                "calculate": TemporalToolConfig(
+                    start_to_close_timeout=10.0,
+                    retry_max_attempts=1,
+                ),
+                # Other tools (get_weather, get_user_info): use defaults
+            },
         )
 
         result = await agent.invoke_async(prompt)

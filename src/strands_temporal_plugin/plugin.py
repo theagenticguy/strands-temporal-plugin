@@ -24,8 +24,9 @@ Usage:
 
 from __future__ import annotations
 
-from .activities import execute_model_activity, execute_tool_activity
+from .activities import execute_model_activity, execute_structured_output_activity, execute_tool_activity
 from .mcp_activities import execute_mcp_tool_activity, list_mcp_tools_activity
+from .session import load_session_activity, save_session_activity
 from collections.abc import Callable, Sequence
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.plugin import SimplePlugin
@@ -48,13 +49,38 @@ _SAFE_PASSTHROUGH_MODULES = (
     "strands.types.event",
     "strands.types._events",  # TypedEvent and event classes (needed for tool executor)
     "strands.types.event_loop",
-    # Strands tool executor base class (for TemporalToolExecutor)
-    # The base class is needed in workflow context for the Agent to use
+    "strands.types.interrupt",  # Interrupt type (needed for hook return values)
+    # Strands Model ABC (for TemporalModelStub subclassing)
+    "strands.models",
+    "strands.models.model",
+    # Strands tool executor base class (for TemporalToolExecutor subclassing)
     "strands.tools",
     "strands.tools.executor",
+    "strands.tools.executors",
+    "strands.tools.executors._executor",
+    # Strands hooks (for before/after tool call events in TemporalToolExecutor)
+    "strands.hooks",
+    "strands.experimental",
+    "strands.experimental.hooks",
+    "strands.experimental.hooks.events",
+    # Strands telemetry (for Trace type in ToolExecutor._execute signature)
+    "strands.telemetry",
+    "strands.telemetry.metrics",
+    "strands.telemetry.tracer",
     # Strands agent core (for Agent class - models do I/O but are replaced)
     "strands.agent",
-    # Note: strands.models is NOT passed through - use TemporalModelStub instead
+    # Strands conversation manager (for ConversationManager in workflow context)
+    "strands.agent.conversation_manager",
+    # Strands structured output context (for ToolExecutor._execute signature)
+    "strands.tools.structured_output",
+    "strands.tools.structured_output._structured_output_context",
+    # Note: strands.models.* provider implementations are NOT passed through
+    # - use TemporalModelStub instead (I/O happens in activities)
+    # Plugin modules (activities/tool_executor/mcp_activities contain activity
+    # references used in workflow context via workflow.execute_activity().
+    # Actual I/O libraries like boto3/httpx/mcp are imported inside functions,
+    # not at module level, so they remain sandbox-restricted.)
+    "strands_temporal_plugin",
 )
 
 
@@ -106,8 +132,11 @@ def _merge_activities(
     plugin_activities = [
         execute_model_activity,
         execute_tool_activity,
+        execute_structured_output_activity,
         list_mcp_tools_activity,
         execute_mcp_tool_activity,
+        load_session_activity,
+        save_session_activity,
     ]
 
     for activity in plugin_activities:

@@ -367,7 +367,7 @@ class TestExecuteMCPToolActivity:
         mock_client.__exit__ = MagicMock(return_value=None)
         mock_client.call_tool_sync.return_value = mock_result
 
-        with patch("strands_temporal_plugin.mcp_activities._create_mcp_client", return_value=mock_client):
+        with patch("strands_temporal_plugin.mcp_activities._get_cached_mcp_client", return_value=mock_client):
             result = await execute_mcp_tool_activity(input_data)
 
         assert result.tool_use_id == "tool_123"
@@ -389,11 +389,9 @@ class TestExecuteMCPToolActivity:
         mock_result.content = []
 
         mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=None)
         mock_client.call_tool_sync.return_value = mock_result
 
-        with patch("strands_temporal_plugin.mcp_activities._create_mcp_client", return_value=mock_client):
+        with patch("strands_temporal_plugin.mcp_activities._get_cached_mcp_client", return_value=mock_client):
             await execute_mcp_tool_activity(input_data)
 
         # Should call with "read" not "fs_read"
@@ -411,11 +409,9 @@ class TestExecuteMCPToolActivity:
         )
 
         mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=None)
         mock_client.call_tool_sync.side_effect = Exception("Tool not found")
 
-        with patch("strands_temporal_plugin.mcp_activities._create_mcp_client", return_value=mock_client):
+        with patch("strands_temporal_plugin.mcp_activities._get_cached_mcp_client", return_value=mock_client):
             result = await execute_mcp_tool_activity(input_data)
 
         assert result.status == "error"
@@ -433,11 +429,9 @@ class TestExecuteMCPToolActivity:
         )
 
         mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=None)
         mock_client.call_tool_sync.side_effect = ConnectionError("Connection lost")
 
-        with patch("strands_temporal_plugin.mcp_activities._create_mcp_client", return_value=mock_client):
+        with patch("strands_temporal_plugin.mcp_activities._get_cached_mcp_client", return_value=mock_client):
             with pytest.raises(ApplicationError) as exc_info:
                 await execute_mcp_tool_activity(input_data)
 
@@ -456,11 +450,9 @@ class TestExecuteMCPToolActivity:
         )
 
         mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=None)
         mock_client.call_tool_sync.side_effect = ValueError("Invalid argument")
 
-        with patch("strands_temporal_plugin.mcp_activities._create_mcp_client", return_value=mock_client):
+        with patch("strands_temporal_plugin.mcp_activities._get_cached_mcp_client", return_value=mock_client):
             result = await execute_mcp_tool_activity(input_data)
 
         assert result.status == "error"
