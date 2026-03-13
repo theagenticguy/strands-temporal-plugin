@@ -29,6 +29,7 @@ open http://localhost:8233
 | [06_structured_output](./06_structured_output/) | Validated Pydantic model responses | Intermediate |
 | [07_session_management](./07_session_management/) | S3-backed conversation persistence | Advanced |
 | [08_custom_provider](./08_custom_provider/) | Custom model provider via import path | Intermediate |
+| [09_failure_resilience](./09_failure_resilience/) | Retry, timeout, and graceful degradation | Intermediate |
 
 ## v0.2.0 Features
 
@@ -92,6 +93,13 @@ The [08_custom_provider](./08_custom_provider/) example demonstrates:
 - Plugging in custom model implementations via `CustomProviderConfig`
 - Import-path-based provider resolution
 - Wrapping existing providers with custom logic
+
+### 8. Failure Resilience
+The [09_failure_resilience](./09_failure_resilience/) example demonstrates:
+- Transient failures retried automatically by Temporal (503 errors)
+- Heartbeat timeout detection for stuck activities
+- Graceful degradation when tools permanently fail
+- Agent continues working despite partial tool failures
 
 ## Prerequisites
 

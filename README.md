@@ -400,6 +400,7 @@ Tools without an entry in `tool_configs` use the default `tool_timeout` (60s).
 | [06_structured_output](examples/06_structured_output/) | Validated Pydantic model responses | Intermediate |
 | [07_session_management](examples/07_session_management/) | S3-backed conversation persistence | Advanced |
 | [08_custom_provider](examples/08_custom_provider/) | Custom model provider via import path | Intermediate |
+| [09_failure_resilience](examples/09_failure_resilience/) | Retry, timeout, and graceful degradation | Intermediate |
 
 Each example follows the same pattern:
 
