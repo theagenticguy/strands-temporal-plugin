@@ -47,7 +47,7 @@ async def main():
 
     # Default prompts
     defaults = {
-        "weather": "Analyze the current weather in San Francisco",
+        "weather": "Analyze the weather in San Francisco assuming it's a typical foggy summer day with 62°F temperature",
         "movie": "Review the movie Inception",
     }
     prompt = args.prompt or defaults[args.type]

@@ -177,7 +177,16 @@ class TemporalSessionManager:
 
         # Extract state from agent
         messages = list(agent.messages) if hasattr(agent, "messages") else []
-        agent_state = dict(agent.state) if hasattr(agent, "state") else {}
+        if hasattr(agent, "state"):
+            state = agent.state
+            # JSONSerializableDict.get() with no args returns all data
+            # Regular dict needs dict() conversion
+            try:
+                agent_state = state.get() if hasattr(state, "get") and not isinstance(state, dict) else dict(state)
+            except TypeError:
+                agent_state = {}
+        else:
+            agent_state = {}
         conversation_manager_state = {}
         if hasattr(agent, "conversation_manager") and hasattr(agent.conversation_manager, "get_state"):
             conversation_manager_state = agent.conversation_manager.get_state()

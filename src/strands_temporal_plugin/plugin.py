@@ -58,6 +58,11 @@ _SAFE_PASSTHROUGH_MODULES = (
     # Strands conversation manager (for ConversationManager in workflow context)
     "strands.agent.conversation_manager",
     # Note: strands.models is NOT passed through - use TemporalModelStub instead
+    # Plugin modules (activities/tool_executor/mcp_activities contain activity
+    # references used in workflow context via workflow.execute_activity().
+    # Actual I/O libraries like boto3/httpx/mcp are imported inside functions,
+    # not at module level, so they remain sandbox-restricted.)
+    "strands_temporal_plugin",
 )
 
 

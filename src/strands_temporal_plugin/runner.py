@@ -93,6 +93,7 @@ Architecture:
 from __future__ import annotations
 
 from .activities import execute_model_activity, execute_structured_output_activity
+from .tool_executor import TemporalToolExecutor
 from .types import (
     BedrockProviderConfig,
     ModelExecutionInput,
@@ -104,6 +105,7 @@ from .types import (
 )
 from collections.abc import AsyncIterator
 from datetime import timedelta
+from strands import Agent
 from strands.types.content import Messages
 from strands.types.streaming import StreamEvent
 from strands.types.tools import ToolSpec
@@ -454,10 +456,6 @@ def create_durable_agent(
         since MCP tool discovery must happen in workflow context before
         creating the agent.
     """
-    # Import here to avoid circular dependencies and sandbox issues
-    from .tool_executor import TemporalToolExecutor
-    from strands import Agent
-
     # Auto-discover tool modules if tools provided
     auto_modules = {}
     if tools:

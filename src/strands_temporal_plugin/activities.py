@@ -471,13 +471,18 @@ async def execute_structured_output_activity(input_data: StructuredOutputInput) 
         module = importlib.import_module(module_path)
         output_model_class = getattr(module, class_name)
 
-        # Call structured_output
+        # Call structured_output (async generator — yields events, last has "output")
         _safe_heartbeat("executing structured output")
-        result = model.structured_output(
+        messages = [{"role": "user", "content": [{"text": input_data.prompt}]}]
+        last_event = None
+        async for event in model.structured_output(
             output_model=output_model_class,
-            prompt=input_data.prompt,
+            prompt=messages,
             system_prompt=input_data.system_prompt,
-        )
+        ):
+            last_event = event
+
+        result = last_event["output"]
 
         # Serialize the result
         if hasattr(result, "model_dump"):

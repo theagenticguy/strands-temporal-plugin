@@ -598,6 +598,12 @@ ProviderConfig = Annotated[  # noqa: F811
     Field(discriminator="provider"),
 ]
 
+# Rebuild models that have forward references to ProviderConfig.
+# Required because `from __future__ import annotations` makes all annotations
+# lazy strings, and ProviderConfig is defined after these models.
+ModelExecutionInput.model_rebuild()
+StructuredOutputInput.model_rebuild()
+
 
 # =============================================================================
 # Serialization Helpers
