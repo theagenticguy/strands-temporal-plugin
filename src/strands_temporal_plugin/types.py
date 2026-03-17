@@ -493,8 +493,7 @@ class SessionConfig(BaseModel):
     """Configuration for S3-backed session persistence.
 
     Used with TemporalSessionManager to load/save agent state through activities.
-    The offset/stream model: S3 is the state store, Temporal is the orchestrator,
-    session_id is the pointer.
+    S3 is the state store, Temporal is the orchestrator, session_id is the pointer.
 
     Example:
         config = SessionConfig(

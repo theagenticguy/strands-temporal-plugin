@@ -1,12 +1,11 @@
 """Temporal Session Manager — S3-backed session persistence via activities.
 
 This module provides session management for durable agents using S3 as the
-state store and Temporal activities for I/O. This implements the offset/stream
-model recommended by Bryan Burkholder (SFDC):
+state store and Temporal activities for I/O:
 
-- S3 is the source of truth (the "stream" of conversation state)
+- S3 is the source of truth for conversation state
 - Temporal is the orchestrator (schedules work, retries, moves executors)
-- session_id is the pointer/offset into the stream
+- session_id is the pointer into the state
 
 Why not use Strands' built-in SessionManager directly?
 Strands' SessionManager hooks fire synchronously in workflow context, where
