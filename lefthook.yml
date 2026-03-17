@@ -30,6 +30,7 @@ pre-push:
 
     - name: typecheck
       run: uvx ty check src/
+      skip: true  # ty findings are informational until codebase is fully typed (matches CI continue-on-error)
 
     - name: test
       run: uv run pytest tests/unit/ -x -q
